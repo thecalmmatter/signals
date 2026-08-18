@@ -37,7 +37,7 @@ documented in the file; the key ones:
 
 | Variable | What it is |
 | --- | --- |
-| `DATABASE_URL` | Your Neon Postgres connection string |
+| `DATABASE_URL` | Your Neon Postgres connection string — **use the pooled one** (hostname has `-pooler` in it). Direct connections exhaust Neon's connection limit fast on serverless hosting. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Clerk **API keys** |
 | `CLERK_WEBHOOK_SECRET` | Clerk webhook signing secret (`whsec_…`) |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-in` -> `/login`, `/signup` (already in the example) |
@@ -112,7 +112,15 @@ Content-Type: `application/json`, body keys the parser expects:
   before being stored/logged.
 
 The admin **Incoming webhook activity** feed (admin-only) shows every alert as
-`Mapped · signal written` or `Unmapped · skipped` and refreshes every 10s.
+`Mapped · signal written` or `Unmapped · skipped` and refreshes every 10s. Each
+unmapped symbol has **Add** (prefills it into the manual-add form below, entry
+price included when Chartlink sent one) and **Drop** (dismisses it from the
+feed) buttons, so triaging the unmapped backlog doesn't mean retyping symbols
+by hand.
+
+If `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are set (see `.env.example`), an
+unmapped scan also pings Telegram — useful since the feed above only updates
+while you have the dashboard open.
 
 ## 6. Billing (dry-run trial + Razorpay subscription)
 

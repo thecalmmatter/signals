@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
+import { sendTelegramMessage } from "@/lib/telegram";
 
 // Chartlink webhook ingestion. PUBLIC by design — proxy.ts does NOT gate this
 // path (Chartlink cannot authenticate via Clerk). Auth = shared secret token in
@@ -235,6 +236,17 @@ export async function POST(req: Request) {
       `INSERT INTO signal_events (event_type, symbol, scan_name, scan_url, detail, raw_payload)
        VALUES ('unmapped_scan', NULL, $1, $2, 'scan_url not present (or inactive) in scan_mappings; no signal written', $3)`,
       [scanName || null, scanUrl, safe]
+    );
+    // Best-effort ping so review doesn't depend on someone watching the
+    // admin dashboard — no-ops if Telegram isn't configured. Timeboxed
+    // inside sendTelegramMessage, never throws.
+    const stocksList = String(body.stocks ?? "").trim();
+    const adminUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/dashboard/admin` : null;
+    await sendTelegramMessage(
+      `🟡 <b>Unmapped scan</b> — ${scanName || scanUrl}\n` +
+        (stocksList ? `${stocksList}\n` : "") +
+        `Not mapped in scan_mappings, no signal written.` +
+        (adminUrl ? `\n${adminUrl}` : "")
     );
     return json({ ok: true, processed: 0, skipped: 1 }, 200);
   }
