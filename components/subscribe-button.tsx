@@ -91,7 +91,7 @@ export function SubscribeButton({ className }: { className?: string }) {
           "inline-flex h-11 items-center justify-center rounded-full bg-emerald-500 px-6 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
         }
       >
-        {busy ? "Opening checkout…" : "Subscribe — ₹499/month"}
+        {busy ? "Opening checkout…" : "Subscribe now"}
       </button>
       {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
     </div>

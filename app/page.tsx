@@ -8,6 +8,7 @@ const PLANS = [
     tagline: "Get a feel for the signal feed.",
     price: "₹0",
     period: "/forever",
+    priceNote: null as string | null,
     features: [
       "Daily swing signals (view only)",
       "1 saved watchlist",
@@ -19,15 +20,16 @@ const PLANS = [
   {
     name: "Pro",
     tagline: "For traders who act on the signal.",
-    price: "₹499",
+    price: "₹•••",
     period: "/month",
+    priceNote: "Pricing unlocks at launch",
     features: [
       "All daily signals + history",
       "Entry, target & stop alerts",
       "Email and push notifications",
       "Priority support",
     ],
-    cta: "Start 14-day trial",
+    cta: "Get early access",
     featured: true,
   },
   {
@@ -35,6 +37,7 @@ const PLANS = [
     tagline: "Teams and institutions.",
     price: "Custom",
     period: "",
+    priceNote: null as string | null,
     features: [
       "Team seats & permissions",
       "API access",
@@ -222,11 +225,23 @@ export default function Home() {
                   </h3>
                   <p className="mt-1 text-xs text-zinc-500">{plan.tagline}</p>
                   <p className="mt-5 flex items-baseline gap-1">
-                    <span className="text-3xl font-semibold tracking-tight text-zinc-50">
+                    <span
+                      className={
+                        plan.priceNote
+                          ? "text-3xl font-semibold tracking-tight text-zinc-50 blur-[3px] select-none"
+                          : "text-3xl font-semibold tracking-tight text-zinc-50"
+                      }
+                      aria-hidden={plan.priceNote ? true : undefined}
+                    >
                       {plan.price}
                     </span>
                     <span className="text-xs text-zinc-500">{plan.period}</span>
                   </p>
+                  {plan.priceNote && (
+                    <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-emerald-400/80">
+                      {plan.priceNote}
+                    </p>
+                  )}
                   <ul className="mt-6 space-y-2.5 text-sm text-zinc-400">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex items-start gap-2">
