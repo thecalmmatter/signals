@@ -56,6 +56,7 @@ psql "$DATABASE_URL" -f scripts/migration_chartlink_v2.sql
 psql "$DATABASE_URL" -f scripts/migration_admin.sql
 psql "$DATABASE_URL" -f scripts/migration_billing.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist.sql
+psql "$DATABASE_URL" -f scripts/migration_waitlist_invite.sql
 psql "$DATABASE_URL" -f scripts/migration_positions.sql
 ```
 
@@ -152,6 +153,19 @@ signal" and an email field. Not linked from the main site; share it directly.
 - No email is sent automatically. `/dashboard/admin` → **Waitlist** shows the
   total, a breakdown by source, and the most recent 100 signups for manual
   follow-up.
+- **Joining the waitlist does not grant access.** By default Clerk's Access
+  mode is **Open**, so anyone can `/signup` directly regardless of the
+  waitlist. To actually gate access:
+  1. In the [Clerk Dashboard](https://dashboard.clerk.com) → your app →
+     **Access mode**, switch from **Open** to **Invite-only** and save. This
+     is free on Clerk's Hobby plan. Now `/signup` shows "you need an
+     invitation" to anyone without one.
+  2. In `/dashboard/admin` → **Waitlist**, click **Invite** next to a signup
+     to send them a real Clerk invitation email (`POST
+     /api/admin/waitlist/invite`, admin-only). The row flips to "invited"
+     once sent; click **Re-invite** to resend (e.g. an expired invite).
+  3. Existing signed-in users are unaffected either way — Invite-only mode
+     only blocks new sign-ups, not existing sessions.
 
 ## 8. Positions ledger (track record)
 

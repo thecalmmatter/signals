@@ -8,6 +8,7 @@ import AdminSignals from "@/components/admin-signals";
 import AdminScanMappings from "@/components/admin-scan-mappings";
 import AdminBilling from "@/components/admin-billing";
 import AdminPositions from "@/components/admin-positions";
+import AdminWaitlist from "@/components/admin-waitlist";
 import { ActivityFeed } from "@/components/activity-feed";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ async function loadWaitlist() {
           ORDER BY total DESC`
       ),
       pool.query(
-        "SELECT email, source, created_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
+        "SELECT email, source, created_at, invited_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
       ),
     ]);
     return {
@@ -36,6 +37,7 @@ async function loadWaitlist() {
         email: r.email as string,
         source: r.source as string | null,
         createdAt: r.created_at as string,
+        invitedAt: (r.invited_at as string | null) ?? null,
       })),
     };
   } catch (error) {
@@ -167,6 +169,12 @@ export default async function AdminPage() {
             <h2 className="text-lg font-semibold tracking-tight text-zinc-50">Waitlist</h2>
             <span className="text-sm text-zinc-500">{waitlist.total} signup{waitlist.total === 1 ? "" : "s"}</span>
           </div>
+          <p className="mb-4 text-sm text-zinc-400">
+            Joining the waitlist is just an interest signal — it does not grant
+            dashboard access on its own. Click <strong className="text-zinc-300">Invite</strong> to
+            send a real Clerk invitation once you&apos;ve set the Clerk app&apos;s
+            Access mode to Invite-only (see README §7).
+          </p>
 
           {waitlist.bySource.length > 0 && (
             <div className="mb-4 flex flex-wrap gap-2">
@@ -181,35 +189,7 @@ export default async function AdminPage() {
             </div>
           )}
 
-          <section className="overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="w-full min-w-[500px] border-collapse text-left text-sm">
-              <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
-                <tr>
-                  <th className="px-3 py-2.5">Email</th>
-                  <th className="px-3 py-2.5">Source</th>
-                  <th className="px-3 py-2.5">Joined</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60">
-                {waitlist.recent.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-8 text-center text-zinc-500">
-                      No signups yet. Share your /waitlist link to get started.
-                    </td>
-                  </tr>
-                )}
-                {waitlist.recent.map((r) => (
-                  <tr key={r.email} className="bg-zinc-950">
-                    <td className="px-3 py-2.5 text-zinc-200">{r.email}</td>
-                    <td className="px-3 py-2.5 text-xs text-zinc-400">{r.source ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-xs text-zinc-400">
-                      {new Date(r.createdAt).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <AdminWaitlist rows={waitlist.recent} />
         </div>
       </main>
     </div>
