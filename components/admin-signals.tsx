@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AdminSignal } from "@/lib/signals-admin";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -39,6 +39,26 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [addForm, setAddForm] = useState<AddForm>({ symbol: "", type: "buy", entry: "", target: "", stop: "" });
+  const [justPrefilled, setJustPrefilled] = useState(false);
+
+  // Listens for "Add" clicks from the webhook activity feed below (see
+  // ActivityFeed) so an unmapped-scan symbol can be pulled straight into this
+  // form instead of the admin retyping it by hand.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const detail = (e as CustomEvent<{ symbol: string; price: number | null }>).detail;
+      if (!detail?.symbol) return;
+      setAddForm((f) => ({
+        ...f,
+        symbol: detail.symbol,
+        entry: detail.price !== null ? String(detail.price) : f.entry,
+      }));
+      setJustPrefilled(true);
+      window.setTimeout(() => setJustPrefilled(false), 2000);
+    }
+    window.addEventListener("signals:prefill-add", onPrefill);
+    return () => window.removeEventListener("signals:prefill-add", onPrefill);
+  }, []);
 
   const setDraft = (id: string, key: keyof Draft, value: string) =>
     setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
@@ -155,9 +175,17 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
       )}
 
       {/* Add manually */}
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <section
+        id="add-signal-manual"
+        className={`scroll-mt-6 rounded-xl border p-5 transition-colors ${
+          justPrefilled ? "border-emerald-500/60 bg-emerald-500/[0.06]" : "border-zinc-800 bg-zinc-900/40"
+        }`}
+      >
         <h2 className="mb-4 text-sm font-semibold text-zinc-200">
-          Add signal manually <span className="ml-1 text-xs font-normal text-zinc-500">(Chartlink never fired on this)</span>
+          Add signal manually{" "}
+          <span className="ml-1 text-xs font-normal text-zinc-500">
+            {justPrefilled ? "— filled from the feed, review & complete below" : "(Chartlink never fired on this)"}
+          </span>
         </h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">

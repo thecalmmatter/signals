@@ -24,22 +24,48 @@ function istDateTime(iso: Date): string {
   }).format(iso);
 }
 
-function stocksFromPayload(raw: unknown): string[] {
-  let parsed: Record<string, unknown> | null = null;
+function parsePayload(raw: unknown): Record<string, unknown> | null {
   if (typeof raw === "string") {
     try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
+      return JSON.parse(raw) as Record<string, unknown>;
     } catch {
-      parsed = null;
+      return null;
     }
-  } else if (typeof raw === "object" && raw !== null) {
-    parsed = raw as Record<string, unknown>;
   }
+  if (typeof raw === "object" && raw !== null) return raw as Record<string, unknown>;
+  return null;
+}
+
+function stocksFromPayload(raw: unknown): string[] {
+  const parsed = parsePayload(raw);
   if (!parsed) return [];
   return String(parsed.stocks ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+// Pairs each stock with its trigger price by index (same rule the Chartlink
+// route itself uses) so an "Add" button in the UI can prefill both symbol
+// and entry price. Returns price: null per item if trigger_prices is
+// missing or its length doesn't line up with stocks — never guesses.
+function symbolPricePairs(raw: unknown): { symbol: string; price: number | null }[] {
+  const parsed = parsePayload(raw);
+  if (!parsed) return [];
+  const symbols = String(parsed.stocks ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const rawPrices = String(parsed.trigger_prices ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const prices = rawPrices.map((p) => {
+    const n = Number(p);
+    return Number.isFinite(n) ? n : null;
+  });
+  const pricesAlign = prices.length === symbols.length;
+  return symbols.map((symbol, i) => ({ symbol, price: pricesAlign ? prices[i] : null }));
 }
 
 export async function GET() {
@@ -59,6 +85,10 @@ export async function GET() {
       eventType: r.event_type,
       symbol: r.symbol,
       stocks: stocksFromPayload(r.raw_payload),
+      // Only meaningful for unmapped_scan (no signal_type => nothing was
+      // written yet) — this is what lets the feed offer an "Add" shortcut
+      // straight into the manual-add form.
+      items: r.event_type === "unmapped_scan" ? symbolPricePairs(r.raw_payload) : [],
       triggerDate: r.trigger_date,
       scanName: r.scan_name,
       scanUrl: r.scan_url,

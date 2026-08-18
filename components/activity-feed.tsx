@@ -6,17 +6,41 @@ function cn(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
 
+type FeedItem = { symbol: string; price: number | null };
+
 type WebhookEvent = {
   id: string;
   eventType: string;
   symbol: string | null;
   stocks: string[];
+  items: FeedItem[];
   triggerDate: string | null;
   scanName: string | null;
   scanUrl: string | null;
   detail: string | null;
   time: string;
 };
+
+const DISMISSED_KEY = "signals:dismissed-feed-items";
+
+function loadDismissed(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissed(set: Set<string>) {
+  try {
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...set]));
+  } catch {
+    // localStorage unavailable (private mode, etc.) — dismiss still works
+    // for the current session via React state, just won't survive reload.
+  }
+}
 
 type FeedResponse = {
   events: WebhookEvent[];
@@ -83,6 +107,23 @@ async function fetchEvents(): Promise<WebhookEvent[]> {
 export function ActivityFeed() {
   const [events, setEvents] = useState<WebhookEvent[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissed());
+
+  const dismissKey = (eventId: string, symbol: string) => `${eventId}:${symbol}`;
+
+  const addToManualForm = (symbol: string, price: number | null) => {
+    window.dispatchEvent(new CustomEvent("signals:prefill-add", { detail: { symbol, price } }));
+    document.getElementById("add-signal-manual")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const dropItem = (eventId: string, symbol: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(dismissKey(eventId, symbol));
+      saveDismissed(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +196,11 @@ export function ActivityFeed() {
             {events.map((e) => {
               const meta = META[e.eventType] ?? fallbackMeta;
               const symbols = symbolsFor(e);
+              const actionable = e.eventType === "unmapped_scan";
+              const visibleItems = actionable
+                ? e.items.filter((it) => !dismissed.has(dismissKey(e.id, it.symbol)))
+                : [];
+              const allReviewed = actionable && e.items.length > 0 && visibleItems.length === 0;
               return (
                 <li key={e.id} className="flex items-start gap-3 px-5 py-3">
                   <span
@@ -178,16 +224,45 @@ export function ActivityFeed() {
                         {e.scanName ?? e.scanUrl ?? "unknown scan"}
                       </span>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      {symbols.map((s) => (
-                        <span
-                          key={s}
-                          className="rounded bg-zinc-800/70 px-1.5 py-0.5 text-[11px] font-medium text-zinc-300"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                      {symbols.length === 0 && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                      {actionable
+                        ? visibleItems.map((it) => (
+                            <span
+                              key={it.symbol}
+                              className="flex items-center gap-1 rounded bg-zinc-800/70 py-0.5 pl-1.5 pr-1 text-[11px] font-medium text-zinc-300"
+                            >
+                              {it.symbol}
+                              {it.price !== null && (
+                                <span className="text-zinc-500">₹{it.price}</span>
+                              )}
+                              <button
+                                onClick={() => addToManualForm(it.symbol, it.price)}
+                                className="ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 transition hover:bg-emerald-500/15"
+                                title="Prefill in Add signal manually"
+                              >
+                                Add
+                              </button>
+                              <button
+                                onClick={() => dropItem(e.id, it.symbol)}
+                                className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 transition hover:bg-zinc-700/60 hover:text-zinc-300"
+                                title="Dismiss from feed"
+                              >
+                                Drop
+                              </button>
+                            </span>
+                          ))
+                        : symbols.map((s) => (
+                            <span
+                              key={s}
+                              className="rounded bg-zinc-800/70 px-1.5 py-0.5 text-[11px] font-medium text-zinc-300"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                      {allReviewed && (
+                        <span className="text-[11px] italic text-zinc-600">reviewed</span>
+                      )}
+                      {!actionable && symbols.length === 0 && (
                         <span className="text-[11px] text-zinc-500">
                           no symbols
                         </span>
