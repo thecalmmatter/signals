@@ -1,0 +1,72 @@
+[
+  {
+    "symbol": "RELIANCE",
+    "name": "Reliance Industries",
+    "signal_type": "buy",
+    "price": 2984.5,
+    "change_pct": 1.2,
+    "entry_price": 2890.0,
+    "target_price": 3150.0,
+    "stop_price": 2840.0,
+    "days_in": 3,
+    "days_to_exit": 2,
+    "status": "active",
+    "generated_at": "2026-08-04T18:00:00+05:30"
+  },
+  {
+    "symbol": "HDFCBANK",
+    "name": "HDFC Bank",
+    "signal_type": "sell",
+    "price": 1789.9,
+    "change_pct": -0.8,
+    "entry_price": 1860.0,
+    "target_price": 1685.0,
+    "stop_price": 1920.0,
+    "days_in": 2,
+    "days_to_exit": 1,
+    "status": "active",
+    "generated_at": "2026-08-04T18:00:00+05:30"
+  },
+  {
+    "symbol": "INFY",
+    "name": "Infosys",
+    "signal_type": "buy",
+    "price": 1598.4,
+    "change_pct": 0.4,
+    "entry_price": 1540.0,
+    "target_price": 1705.0,
+    "stop_price": 1500.0,
+    "days_in": 1,
+    "days_to_exit": 6,
+    "status": "active",
+    "generated_at": "2026-08-04T18:00:00+05:30"
+  },
+  {
+    "symbol": "TITAN",
+    "name": "Titan Company",
+    "signal_type": "sell",
+    "price": 3490.2,
+    "change_pct": -0.6,
+    "entry_price": 3620.0,
+    "target_price": 3310.0,
+    "stop_price": 3730.0,
+    "days_in": 3,
+    "days_to_exit": 2,
+    "status": "active",
+    "generated_at": "2026-08-04T18:00:00+05:30"
+  },
+  {
+    "symbol": "BHARTIARTL",
+    "name": "Bharti Airtel",
+    "signal_type": "buy",
+    "price": 1654.8,
+    "change_pct": 0.7,
+    "entry_price": 1598.0,
+    "target_price": 1750.0,
+    "stop_price": 1560.0,
+    "days_in": 2,
+    "days_to_exit": 1,
+    "status": "active",
+    "generated_at": "2026-08-04T18:00:00+05:30"
+  }
+]

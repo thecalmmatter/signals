@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ---- Ticker marquee (pure CSS, duplicated list + transform) ---- */
+
+@keyframes ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes ticker-scroll-vertical {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
+.ticker-viewport {
+  position: relative;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 3%,
+    black 97%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 3%,
+    black 97%,
+    transparent
+  );
+}
+
+.ticker-viewport--vertical {
+  position: relative;
+  overflow: hidden;
+  max-height: 30rem;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 4%,
+    black 96%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 4%,
+    black 96%,
+    transparent
+  );
+}
+
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker-scroll var(--ticker-duration, 60s) linear infinite;
+  will-change: transform;
+}
+
+.ticker-track--vertical {
+  flex-direction: column;
+  width: 100%;
+  animation-name: ticker-scroll-vertical;
+}
+
+.ticker-track.is-paused {
+  animation-play-state: paused;
+}
+
+.ticker-track--static {
+  animation: none;
+  flex-wrap: wrap;
+  width: auto;
+}
+
+.ticker-dup {
+  display: contents;
+}
+
+/* Duplicated copy participates in the flex row/column but stays hidden
+   when autoplay is disabled (reduced motion). */
+.ticker-card {
+  perspective: 1000px;
+}
+
+.ticker-tilt {
+  display: block;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.ticker-flip {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ticker-flip.is-open {
+  transform: rotateY(180deg);
+}
+
+.ticker-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.ticker-face--back {
+  transform: rotateY(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .ticker-track {
+    animation: none;
+  }
+
+  .ticker-track:not(.ticker-track--vertical) {
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .ticker-dup {
+    display: none;
+  }
+
+  .ticker-viewport,
+  .ticker-viewport--vertical {
+    overflow-y: auto;
+    max-height: 30rem;
+  }
+
+  .ticker-flip {
+    transition: none;
+  }
+}
