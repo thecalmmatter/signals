@@ -192,6 +192,29 @@ source of truth for a future win-rate / statistical-edge report.
   called this trade publicly on this date," independent of whatever the admin
   signals view currently shows for that symbol.
 
+## 9. Broker order placement (Fyers)
+
+`/dashboard/admin/broker` — admin-only. Places real orders on the **same
+Fyers account** already configured via `FYERS_APP_ID` / `FYERS_ACCESS_TOKEN`
+(see §2/§4.5) and shows that account's running positions live. This is not a
+per-user brokerage feature — there's one shared broker connection (yours),
+and only `ADMIN_USER_IDS` can reach the page or its API routes.
+
+- **Place order**: symbol, qty, Buy/Sell, Market/Limit, CNC (delivery) or
+  Intraday. Fires one plain order — no auto stop-loss/target attached, you
+  manage exits yourself (in Fyers or by hand). A confirm dialog shows the
+  full order summary before it's sent, since this moves real money.
+- **Running positions**: pulled live from Fyers' `/positions` endpoint —
+  symbol, side, qty, avg price, LTP, and P&L. Polls every 15s. Separate from
+  the `positions` ledger in §8 (that's a hand-logged public track record,
+  not tied to actual broker quantities).
+- `lib/fyers-orders.ts` — the REST client (`placeOrder`, `getPositions`,
+  `getFunds`), same auth pattern as `lib/fyers.ts`.
+- `GET/POST /api/admin/broker/{positions,orders}` — admin-only. Since
+  `FYERS_ACCESS_TOKEN` expires daily (refresh via
+  `scripts/fyers-get-token.mjs`, see §2), a stale token surfaces here as an
+  inline "couldn't reach Fyers" banner rather than a hard failure.
+
 ## Useful commands
 
 ```bash

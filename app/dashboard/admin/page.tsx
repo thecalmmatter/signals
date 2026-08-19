@@ -124,12 +124,20 @@ export default async function AdminPage() {
               signal_events and never undo a webhook&apos;s override decision.
             </p>
           </div>
-          <a
-            href="/dashboard"
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800"
-          >
-            ← Back to dashboard
-          </a>
+          <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/dashboard/admin/broker"
+              className="rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition hover:bg-emerald-500/20"
+            >
+              Broker — Fyers →
+            </a>
+            <a
+              href="/dashboard"
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800"
+            >
+              ← Back to dashboard
+            </a>
+          </div>
         </div>
         <AdminSignals signals={rows.map((r) => mapAdminRow(r))} />
         <div className="mt-8">
