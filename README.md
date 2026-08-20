@@ -58,6 +58,7 @@ psql "$DATABASE_URL" -f scripts/migration_billing.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist_invite.sql
 psql "$DATABASE_URL" -f scripts/migration_positions.sql
+psql "$DATABASE_URL" -f scripts/migration_positions_signal_link.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -181,16 +182,25 @@ An admin-only record of the swing positions actually posted publicly —
 separate from `signals` (which only drives the live ticker). This is the
 source of truth for a future win-rate / statistical-edge report.
 
-- `/dashboard/admin` → **Positions ledger**: log a symbol/direction/entry/
-  target/stop with the date posted, then mark it "Hit target," "Hit stop," or
-  "Close" (manual exit) as it plays out. Shows a running win-rate stat over
-  closed positions.
+- **Auto-populated from `signals`** — no manual re-entry. The moment a
+  signal has entry/target/stop all set (adding one by hand in
+  **Add signal manually**, or filling those in on a webhook-triggered signal
+  that arrived without prices), a matching ledger row is created or updated
+  automatically. `positions.signal_id` uniquely links the two, so re-saving
+  a signal's prices updates its existing ledger row instead of duplicating
+  it. The ledger table shows an **auto** / **manual** badge per row.
+- `/dashboard/admin` → **Positions ledger**: mark a row "Hit target," "Hit
+  stop," or "Close" (manual exit) as it plays out — that part is still a
+  manual call, since nothing currently tracks fills automatically. Shows a
+  running win-rate stat over closed positions. The **Log a position by
+  hand** form is now a fallback, for a call you made outside the signals
+  table entirely.
 - `GET/POST /api/admin/positions`, `PATCH/DELETE /api/admin/positions/[id]`
   — all admin-only, nested under `/api/admin` (already covered by
   `proxy.ts`'s protected-route list, no separate wiring needed).
-- Not linked to `signals` by foreign key on purpose: a logged position is "I
-  called this trade publicly on this date," independent of whatever the admin
-  signals view currently shows for that symbol.
+  `upsertPositionFromSignal` (`lib/positions-admin.ts`) is called from
+  `POST /api/signals` and `PATCH /api/signals/[id]` — it never blocks the
+  signal write if it fails (e.g. migration not applied yet).
 
 ## 9. Broker order placement (Fyers)
 

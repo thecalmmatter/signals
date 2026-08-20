@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
+import { upsertPositionFromSignal } from "@/lib/positions-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,30 @@ export async function PATCH(
   );
 
   const updated = await pool.query(`SELECT ${ADMIN_COLUMNS} FROM signals WHERE id = $1`, [id]);
-  return json({ signal: mapAdminRow(updated.rows[0]) }, 200);
+  const fresh = updated.rows[0];
+
+  // Auto-populate the track-record ledger the moment entry/target/stop are
+  // all present — including the common case of completing a webhook-
+  // triggered signal that arrived with no prices. No separate "log this
+  // position" step needed. Never blocks the signal write.
+  if (fresh.entry_price !== null && fresh.target_price !== null && fresh.stop_price !== null) {
+    try {
+      await upsertPositionFromSignal(pool, {
+        signalId: id,
+        symbol: String(fresh.symbol),
+        direction: fresh.signal_type as "buy" | "sell",
+        entryPrice: Number(fresh.entry_price),
+        targetPrice: Number(fresh.target_price),
+        stopPrice: Number(fresh.stop_price),
+        openedAt: fresh.trigger_date as string | null,
+        createdBy: adminId,
+      });
+    } catch (error) {
+      console.error("upsertPositionFromSignal failed (run scripts/migration_positions_signal_link.sql?)", error);
+    }
+  }
+
+  return json({ signal: mapAdminRow(fresh) }, 200);
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {

@@ -202,7 +202,11 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
       {/* Add manually */}
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
         <h2 className="mb-4 text-sm font-semibold text-zinc-200">
-          Log a posted position <span className="ml-1 text-xs font-normal text-zinc-500">(what you actually called publicly)</span>
+          Log a position by hand{" "}
+          <span className="ml-1 text-xs font-normal text-zinc-500">
+            (optional — most rows below fill in on their own once a signal has entry/target/stop.
+            Use this only for a call you made outside the signals table.)
+          </span>
         </h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
@@ -290,6 +294,7 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
             <tr>
               <th className="px-3 py-2.5">Symbol</th>
               <th className="px-3 py-2.5">Dir</th>
+              <th className="px-3 py-2.5">Source</th>
               <th className="px-3 py-2.5">Posted</th>
               <th className="px-3 py-2.5">Entry</th>
               <th className="px-3 py-2.5">Target</th>
@@ -303,7 +308,7 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
           <tbody className="divide-y divide-zinc-800/60">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={11} className="px-3 py-8 text-center text-zinc-500">
                   No positions logged yet.
                 </td>
               </tr>
@@ -325,6 +330,18 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
                       }`}
                     >
                       {r.direction}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
+                        r.signalId
+                          ? "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60"
+                          : "bg-sky-500/15 text-sky-400 ring-sky-400/30"
+                      }`}
+                      title={r.signalId ? `Auto-populated from signal #${r.signalId}` : "Logged by hand"}
+                    >
+                      {r.signalId ? "auto" : "manual"}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-xs text-zinc-400">{r.openedAt ?? "—"}</td>

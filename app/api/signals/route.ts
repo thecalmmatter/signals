@@ -5,6 +5,7 @@ import { getAdminUserId } from "@/lib/admin";
 import { getAccessStatus } from "@/lib/access";
 import { getQuotes, type Quote } from "@/lib/fyers";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
+import { upsertPositionFromSignal } from "@/lib/positions-admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -177,6 +178,26 @@ export async function POST(req: Request) {
      VALUES ($1, $2, $3, $4, NULL)`,
     [id, eventType, symbol, eventDetail]
   );
+
+  // Auto-populate the track-record ledger — entry/target/stop are always
+  // present on a manual add, so this always fires here (no separate "log
+  // this position" step needed). Never blocks the signal write.
+  if (entry !== null && target !== null && stop !== null) {
+    try {
+      await upsertPositionFromSignal(pool, {
+        signalId: id,
+        symbol,
+        direction: type as "buy" | "sell",
+        entryPrice: entry,
+        targetPrice: target,
+        stopPrice: stop,
+        openedAt: null,
+        createdBy: adminId,
+      });
+    } catch (error) {
+      console.error("upsertPositionFromSignal failed (run scripts/migration_positions_signal_link.sql?)", error);
+    }
+  }
 
   const row = await pool.query(`SELECT ${ADMIN_COLUMNS} FROM signals WHERE id = $1`, [id]);
   return json({ signal: mapAdminRow(row.rows[0]) }, existing.rows[0] ? 200 : 201);
