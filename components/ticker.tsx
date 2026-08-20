@@ -249,8 +249,6 @@ export function Ticker({ fallback, live = false, max }: TickerProps) {
     setPaused(false);
   };
 
-  const noopExpand = () => {};
-
   const handlePauseToggle = () => {
     if (paused) setOpenSymbol(null);
     setPaused((p) => !p);
@@ -353,14 +351,22 @@ export function Ticker({ fallback, live = false, max }: TickerProps) {
                   </div>
                 ))}
                 {animate && (
-                  <div className="ticker-dup" inert aria-hidden="true">
+                  // Not `inert` — the marquee scrolls this copy in and out of
+                  // view opposite the primary track, so at any given pause
+                  // point one copy or the other is what's actually visible.
+                  // Making this one a dead no-op made whichever symbol
+                  // landed here unclickable (looked like a random per-symbol
+                  // bug, but it was purely a scroll-position coincidence).
+                  // aria-hidden still keeps screen readers from hearing the
+                  // feed announced twice.
+                  <div className="ticker-dup" aria-hidden="true">
                     {displayed.map((s) => (
                       <div key={`h-b-${s.symbol}`} className="px-2">
                         <TickerCard
                           stock={s}
-                          open={false}
+                          open={openSymbol === s.symbol}
                           onToggle={handleCardToggle}
-                          onExpand={noopExpand}
+                          onExpand={handleExpand}
                           widthClass="w-64"
                         />
                       </div>
@@ -391,14 +397,14 @@ export function Ticker({ fallback, live = false, max }: TickerProps) {
                   </div>
                 ))}
                 {animate && (
-                  <div className="ticker-dup" inert aria-hidden="true">
+                  <div className="ticker-dup" aria-hidden="true">
                     {displayed.map((s) => (
                       <div key={`v-b-${s.symbol}`} className="w-full py-1.5">
                         <TickerCard
                           stock={s}
-                          open={false}
+                          open={openSymbol === s.symbol}
                           onToggle={handleCardToggle}
-                          onExpand={noopExpand}
+                          onExpand={handleExpand}
                         />
                       </div>
                     ))}
