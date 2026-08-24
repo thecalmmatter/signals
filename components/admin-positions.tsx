@@ -17,6 +17,29 @@ const STATUS_LABEL: Record<string, string> = {
   closed_manual: "closed (manual)",
 };
 
+// Days between opened_at and closed_at (or today, if still open). Dates are
+// plain YYYY-MM-DD strings (see fmtDate in lib/positions-admin.ts) — parsed
+// as UTC midnight so this doesn't drift a day depending on the browser's
+// timezone.
+function daysHeld(openedAt: string | null, closedAt: string | null): number | null {
+  if (!openedAt) return null;
+  const start = new Date(`${openedAt}T00:00:00Z`).getTime();
+  if (Number.isNaN(start)) return null;
+  const end = closedAt ? new Date(`${closedAt}T00:00:00Z`).getTime() : Date.now();
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
+// Return since entry, as a %. Open positions use the live quote (undefined
+// if Fyers is down/unconfigured or this symbol has no quote — degrades to
+// "—" rather than a wrong number). Closed positions use the stored
+// exit_price instead, no live call needed. Flips sign for sell/short.
+function returnPct(p: AdminPosition, livePrice: number | undefined): number | null {
+  const current = p.status === "open" ? (livePrice ?? null) : p.exitPrice;
+  if (current === null || current === undefined || !p.entryPrice) return null;
+  const raw = ((current - p.entryPrice) / p.entryPrice) * 100;
+  return p.direction === "sell" ? -raw : raw;
+}
+
 const inputCls =
   "w-24 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none transition focus:border-zinc-600";
 
@@ -54,7 +77,14 @@ function draftFrom(p: AdminPosition): Draft {
   };
 }
 
-export default function AdminPositions({ positions }: { positions: AdminPosition[] }) {
+export default function AdminPositions({
+  positions,
+  livePrices = {},
+}: {
+  positions: AdminPosition[];
+  /** symbol -> live LTP, for open positions' return %. See loadLivePrices in app/dashboard/admin/page.tsx. */
+  livePrices?: Record<string, number>;
+}) {
   const [rows, setRows] = useState<AdminPosition[]>(positions);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
     Object.fromEntries(positions.map((p) => [p.id, draftFrom(p)]))
@@ -69,8 +99,20 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
     const wins = rows.filter((r) => r.status === "hit_target").length;
     const losses = rows.filter((r) => r.status === "hit_stop").length;
     const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null;
-    return { total: rows.length, open: rows.filter((r) => r.status === "open").length, wins, losses, winRate };
-  }, [rows]);
+    const returns = rows
+      .map((r) => returnPct(r, livePrices[r.symbol]))
+      .filter((v): v is number => v !== null);
+    const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : null;
+    return {
+      total: rows.length,
+      open: rows.filter((r) => r.status === "open").length,
+      wins,
+      losses,
+      winRate,
+      avgReturn,
+      avgReturnCount: returns.length,
+    };
+  }, [rows, livePrices]);
 
   const setDraft = (id: string, key: keyof Draft, value: string) =>
     setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
@@ -197,6 +239,17 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
             {stats.winRate.toFixed(0)}% win rate (closed only)
           </span>
         )}
+        {stats.avgReturn !== null && (
+          <span
+            className={`rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 ${
+              stats.avgReturn >= 0 ? "text-emerald-400" : "text-red-400"
+            }`}
+            title="Open positions use live price, closed use exit price. Positions with no price yet (Fyers down/unconfigured) are excluded."
+          >
+            {stats.avgReturn >= 0 ? "+" : ""}
+            {stats.avgReturn.toFixed(1)}% avg return ({stats.avgReturnCount} of {stats.total})
+          </span>
+        )}
       </div>
 
       {/* Add manually */}
@@ -300,6 +353,8 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
               <th className="px-3 py-2.5">Target</th>
               <th className="px-3 py-2.5">Stop</th>
               <th className="px-3 py-2.5">Exit</th>
+              <th className="px-3 py-2.5">Return</th>
+              <th className="px-3 py-2.5">Days</th>
               <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Notes</th>
               <th className="px-3 py-2.5">Actions</th>
@@ -308,7 +363,7 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
           <tbody className="divide-y divide-zinc-800/60">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={13} className="px-3 py-8 text-center text-zinc-500">
                   No positions logged yet.
                 </td>
               </tr>
@@ -316,6 +371,8 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
             {rows.map((r) => {
               const d = drafts[r.id];
               const closed = r.status !== "open";
+              const ret = returnPct(r, livePrices[r.symbol]);
+              const days = daysHeld(r.openedAt, r.closedAt);
               return (
                 <tr key={r.id} className={`bg-zinc-950 transition ${closed ? "opacity-80" : ""}`}>
                   <td className="px-3 py-2.5">
@@ -382,6 +439,23 @@ export default function AdminPositions({ positions }: { positions: AdminPosition
                       placeholder="—"
                     />
                   </td>
+                  <td
+                    className={`px-3 py-2.5 font-medium tabular-nums ${
+                      ret === null ? "text-zinc-600" : ret >= 0 ? "text-emerald-400" : "text-red-400"
+                    }`}
+                    title={
+                      ret === null
+                        ? r.status === "open"
+                          ? "no live price (Fyers down/unconfigured, or no quote for this symbol)"
+                          : "no exit price logged yet"
+                        : r.status === "open"
+                          ? "vs live price"
+                          : "vs logged exit price"
+                    }
+                  >
+                    {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums text-zinc-400">{days === null ? "—" : days}</td>
                   <td className="px-3 py-2.5">
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${STATUS_STYLE[r.status]}`}
