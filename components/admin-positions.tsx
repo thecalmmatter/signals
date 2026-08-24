@@ -1,44 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { AdminPosition } from "@/lib/positions-admin";
-
-const STATUS_STYLE: Record<string, string> = {
-  open: "bg-sky-500/15 text-sky-400 ring-sky-400/30",
-  hit_target: "bg-emerald-500/15 text-emerald-400 ring-emerald-400/30",
-  hit_stop: "bg-red-500/15 text-red-400 ring-red-400/30",
-  closed_manual: "bg-zinc-700/40 text-zinc-400 ring-zinc-500/30",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  open: "open",
-  hit_target: "hit target",
-  hit_stop: "hit stop",
-  closed_manual: "closed (manual)",
-};
-
-// Days between opened_at and closed_at (or today, if still open). Dates are
-// plain YYYY-MM-DD strings (see fmtDate in lib/positions-admin.ts) — parsed
-// as UTC midnight so this doesn't drift a day depending on the browser's
-// timezone.
-function daysHeld(openedAt: string | null, closedAt: string | null): number | null {
-  if (!openedAt) return null;
-  const start = new Date(`${openedAt}T00:00:00Z`).getTime();
-  if (Number.isNaN(start)) return null;
-  const end = closedAt ? new Date(`${closedAt}T00:00:00Z`).getTime() : Date.now();
-  return Math.max(0, Math.round((end - start) / 86_400_000));
-}
-
-// Return since entry, as a %. Open positions use the live quote (undefined
-// if Fyers is down/unconfigured or this symbol has no quote — degrades to
-// "—" rather than a wrong number). Closed positions use the stored
-// exit_price instead, no live call needed. Flips sign for sell/short.
-function returnPct(p: AdminPosition, livePrice: number | undefined): number | null {
-  const current = p.status === "open" ? (livePrice ?? null) : p.exitPrice;
-  if (current === null || current === undefined || !p.entryPrice) return null;
-  const raw = ((current - p.entryPrice) / p.entryPrice) * 100;
-  return p.direction === "sell" ? -raw : raw;
-}
+import {
+  type AdminPosition,
+  STATUS_STYLE,
+  STATUS_LABEL,
+  daysHeld,
+  returnPct,
+} from "@/lib/positions-admin";
 
 const inputCls =
   "w-24 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none transition focus:border-zinc-600";

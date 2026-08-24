@@ -3,8 +3,7 @@ import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
 import { isBillingEnabled } from "@/lib/access";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
-import { POSITION_COLUMNS, mapPositionRow, type AdminPosition } from "@/lib/positions-admin";
-import { getQuotes } from "@/lib/fyers";
+import { POSITION_COLUMNS, mapPositionRow, loadLivePricesFor } from "@/lib/positions-admin";
 import AdminSignals from "@/components/admin-signals";
 import AdminScanMappings from "@/components/admin-scan-mappings";
 import AdminBilling from "@/components/admin-billing";
@@ -62,21 +61,6 @@ async function loadPositions() {
   }
 }
 
-// Live price per open position's symbol, for the "return since entry" column
-// — closed positions use their stored exit_price instead, no live call
-// needed. Best-effort: Fyers being unconfigured/down degrades to no live
-// column rather than breaking the whole admin page.
-async function loadLivePrices(positions: AdminPosition[]): Promise<Record<string, number>> {
-  const symbols = [...new Set(positions.filter((p) => p.status === "open").map((p) => p.symbol))];
-  if (symbols.length === 0) return {};
-  try {
-    const quotes = await getQuotes(symbols);
-    return Object.fromEntries([...quotes.entries()].map(([symbol, q]) => [symbol, q.ltp]));
-  } catch (error) {
-    console.error("failed to load live prices for positions ledger", error);
-    return {};
-  }
-}
 
 // Billing tables (scripts/migration_billing.sql) may not be applied on every
 // environment yet — degrade to an empty panel instead of a hard 500 if so.
@@ -127,7 +111,7 @@ export default async function AdminPage() {
   const billing = await loadBilling();
   const waitlist = await loadWaitlist();
   const positions = await loadPositions();
-  const livePrices = await loadLivePrices(positions);
+  const livePrices = await loadLivePricesFor(positions);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-950 text-zinc-100">

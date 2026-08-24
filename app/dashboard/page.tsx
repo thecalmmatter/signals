@@ -1,5 +1,6 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { Ticker } from "@/components/ticker";
 import { Paywall } from "@/components/paywall";
@@ -50,6 +51,12 @@ export default async function DashboardPage() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard/track-record"
+              className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
+            >
+              Track record
+            </Link>
             <span className="hidden text-xs text-zinc-400 sm:block">{email}</span>
             <UserButton />
           </div>
