@@ -3,9 +3,9 @@ import { auth } from "@clerk/nextjs/server";
 import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
 import { getAccessStatus } from "@/lib/access";
-import { getQuotes, type Quote } from "@/lib/fyers";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
+import { loadLiveSignals } from "@/lib/live-signals";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,27 +18,6 @@ function goodNum(v: unknown): number | null | "invalid" {
   return Number.isFinite(n) ? n : "invalid";
 }
 
-// Live quotes are shared across every browser polling this route (every
-// signed-in user's ticker hits this every 10s) — cache briefly so we're not
-// hammering Fyers once per request. Keyed by the sorted symbol set so it
-// self-invalidates when the active signal list changes.
-type QuoteCacheEntry = { at: number; data: Map<string, Quote> };
-let quoteCache: QuoteCacheEntry | null = null;
-let quoteCacheKey = "";
-const QUOTE_TTL_MS = 20_000;
-
-async function getQuotesCached(symbols: string[]): Promise<Map<string, Quote>> {
-  if (symbols.length === 0) return new Map();
-  const key = [...symbols].sort().join(",");
-  if (quoteCache && quoteCacheKey === key && Date.now() - quoteCache.at < QUOTE_TTL_MS) {
-    return quoteCache.data;
-  }
-  const data = await getQuotes(symbols);
-  quoteCache = { at: Date.now(), data };
-  quoteCacheKey = key;
-  return data;
-}
-
 export async function GET() {
   const { userId } = await auth();
   if (!userId) return json({ error: "unauthorized" }, 401);
@@ -46,56 +25,31 @@ export async function GET() {
   if (!access.allowed) return json({ error: "subscription required" }, 402);
 
   try {
-    // Duplicate active rows can exist per symbol (manual rows have NULL
-    // trigger_date/scan_url, and Postgres doesn't enforce uniqueness across
-    // NULLs) — DISTINCT ON collapses to the most recently updated row per
-    // symbol so an edit always wins over a stale duplicate.
-    const { rows } = await getPool().query(
-      `SELECT * FROM (
-         SELECT DISTINCT ON (symbol)
-                symbol, name, signal_type, price,
-                entry_price, target_price, stop_price, days_in, days_to_exit,
-                status, generated_at, updated_at
-           FROM signals
-          WHERE status = 'active'
-          ORDER BY symbol, updated_at DESC
-       ) t
-       ORDER BY generated_at DESC, symbol`
-    );
+    // loadLiveSignals is the single source of truth for "what's live right
+    // now" (status='active', one row per symbol, live Fyers quotes merged
+    // in) — the track record page reads from the exact same place, so the
+    // two can never show different lists.
+    const { signals: live } = await loadLiveSignals();
 
-    // Price and %change shown on the ticker are live market data, not
-    // admin-entered — fetch a live quote per symbol (batched, cached) and
-    // use it whenever available. Falls back to the DB's stored price (e.g.
-    // Chartlink's trigger-time price) with 0% change if Fyers is down or a
-    // symbol has no quote, rather than breaking the whole feed.
-    let quotes = new Map<string, Quote>();
-    try {
-      quotes = await getQuotesCached(rows.map((r) => r.symbol));
-    } catch (error) {
-      console.error("GET /api/signals: live quotes unavailable, falling back to stored price", error);
-    }
-
-    const signals = rows.map((r) => {
-      const quote = quotes.get(r.symbol);
-      const price = quote ? quote.ltp : Number(r.price) || 0;
-      const changePct = quote && quote.prevClose ? ((quote.ltp - quote.prevClose) / quote.prevClose) * 100 : 0;
-      const change = quote ? quote.ltp - quote.prevClose : 0;
-      return {
-        symbol: r.symbol,
-        name: r.name ?? r.symbol,
-        signal: r.signal_type,
-        price,
-        changePct,
-        change,
-        entry: Number(r.entry_price),
-        target: Number(r.target_price),
-        stop: Number(r.stop_price),
-        // No longer shown on the ticker, but the chat feature still uses
-        // this as background context — keep it populated, just not rendered.
-        daysIn: Number(r.days_in) || 0,
-        daysToExit: Number(r.days_to_exit) || 0,
-      };
-    });
+    // TickerStock (lib/stocks.ts) expects non-null entry/target/stop —
+    // coerce missing values to 0, same as this route always has (a fresh
+    // webhook signal without entry/target/stop filled in yet still shows a
+    // card, just with 0s until an admin completes it).
+    const signals = live.map((s) => ({
+      symbol: s.symbol,
+      name: s.name,
+      signal: s.signal,
+      price: s.price,
+      changePct: s.changePct,
+      change: s.change,
+      entry: s.entry ?? 0,
+      target: s.target ?? 0,
+      stop: s.stop ?? 0,
+      // No longer shown on the ticker, but the chat feature still uses
+      // this as background context — keep it populated, just not rendered.
+      daysIn: s.daysIn,
+      daysToExit: s.daysToExit,
+    }));
 
     return NextResponse.json({ signals, generatedAt: new Date().toISOString() });
   } catch (error) {
