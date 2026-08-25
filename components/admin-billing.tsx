@@ -253,10 +253,18 @@ export default function AdminBilling({
     setBusyOn(id, true);
     try {
       const draft = valueOverride !== undefined ? valueOverride : drafts[id];
+      const user = users.find((u) => u.id === id);
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ trialEndsAt: draft ? new Date(draft).toISOString() : null }),
+        body: JSON.stringify({
+          trialEndsAt: draft ? new Date(draft).toISOString() : null,
+          // Only matters the first time — lets the API create the local
+          // row if this user is real in Clerk but hasn't synced yet.
+          email: user?.email,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "save failed");
@@ -274,10 +282,16 @@ export default function AdminBilling({
     setError(null);
     setBusyOn(id, true);
     try {
+      const user = users.find((u) => u.id === id);
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ subscriptionStatus: status }),
+        body: JSON.stringify({
+          subscriptionStatus: status,
+          email: user?.email,
+          firstName: user?.firstName,
+          lastName: user?.lastName,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "save failed");

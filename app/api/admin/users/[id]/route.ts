@@ -20,11 +20,33 @@ export async function PATCH(
 
   const { id } = await ctx.params;
 
-  let body: { trialEndsAt?: string | null; subscriptionStatus?: string };
+  let body: {
+    trialEndsAt?: string | null;
+    subscriptionStatus?: string;
+    // Identity fields, only needed the first time an admin acts on a user
+    // who's real in Clerk but has no local row yet (webhook hasn't synced
+    // them, or they haven't opened /dashboard). See loadClerkUsers() in
+    // app/dashboard/admin/users/page.tsx.
+    email?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+  };
   try {
     body = await req.json();
   } catch {
     return json({ error: "invalid json" }, 400);
+  }
+
+  // Upsert the base row first so the UPDATE below always has something to
+  // land on. ON CONFLICT DO NOTHING — never clobbers email/name the webhook
+  // already synced, this is purely a "make sure the row exists" step.
+  if (body.email) {
+    await getPool().query(
+      `INSERT INTO users (id, email, first_name, last_name, subscription_status)
+       VALUES ($1, $2, $3, $4, 'none')
+       ON CONFLICT (id) DO NOTHING`,
+      [id, body.email, body.firstName ?? null, body.lastName ?? null]
+    );
   }
 
   const sets: string[] = [];
