@@ -92,6 +92,23 @@ export async function PATCH(
 
   await pool.query(`UPDATE signals SET ${sets.join(", ")} WHERE id = ${P(id)}`, vals);
 
+  // An admin touching this signal at all is the "manually removed" reset —
+  // clears any sticky STOPPED/TARGET HIT outcome lock (lib/live-signals.ts)
+  // so it goes back to being governed by live price. Separate best-effort
+  // query: scripts/migration_signal_outcome_lock.sql may not be applied on
+  // every environment yet, and this must never block the main signal edit.
+  try {
+    await pool.query(
+      `UPDATE signals SET outcome_locked = NULL, outcome_locked_at = NULL WHERE id = $1`,
+      [id]
+    );
+  } catch (error) {
+    console.error(
+      "PATCH /api/signals/[id]: failed to clear outcome_locked (run scripts/migration_signal_outcome_lock.sql?)",
+      error
+    );
+  }
+
   // Manual actions: raw_payload is NULL (there is no webhook payload behind it).
   await pool.query(
     `INSERT INTO signal_events (signal_id, event_type, symbol, trigger_date, scan_name, detail, raw_payload)

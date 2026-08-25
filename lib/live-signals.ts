@@ -17,11 +17,18 @@ import { getPool } from "./db";
 import { getQuotes, type Quote } from "./fyers";
 
 /**
- * Live, price-derived outcome — never stored, always recomputed from the
- * current quote against the signal's own targets/stop. This is what powers
- * the DIR badge flipping from "BUY" to "TARGET HIT"/"STOPPED" automatically
- * once price crosses one of those levels, instead of a signal sitting there
- * looking like an open BUY forever until an admin manually suppresses it.
+ * Live, price-derived outcome. This is what powers the DIR badge flipping
+ * from "BUY" to "TARGET HIT"/"STOPPED" automatically once price crosses one
+ * of those levels, instead of a signal sitting there looking like an open
+ * BUY forever until an admin manually suppresses it.
+ *
+ * Once price crosses the stop or a target, that outcome is STICKY — see
+ * loadLiveSignals() below, which persists it to signals.outcome_locked the
+ * first time it happens and prefers the locked value over live price on
+ * every call after that. A "stopped" signal must never quietly go back to
+ * looking like an open BUY just because price bounced back above the stop —
+ * that flip-flopping is exactly what confused things before. Only an admin
+ * editing the signal (PATCH /api/signals/[id]) clears the lock.
  */
 export type SignalOutcome = "open" | "target_hit" | "stopped";
 
@@ -104,19 +111,49 @@ async function getQuotesCached(symbols: string[]): Promise<Map<string, Quote>> {
   return data;
 }
 
+const BASE_COLUMNS =
+  "id, symbol, name, signal_type, price, entry_price, target_price, target_price_2, target_price_3, " +
+  "stop_price, days_in, days_to_exit, status, generated_at, updated_at";
+
+async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
+  // outcome_locked/outcome_locked_at (scripts/migration_signal_outcome_lock.sql)
+  // may not be applied on every environment yet — fall back to the columns
+  // without them instead of a hard failure that would take the whole ticker
+  // down. Locking just won't happen until the migration runs.
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (symbol)
+                ${BASE_COLUMNS}, outcome_locked, outcome_locked_at
+           FROM signals
+          WHERE status = 'active'
+          ORDER BY symbol, updated_at DESC
+       ) t
+       ORDER BY generated_at DESC, symbol`
+    );
+    return { rows, lockSupported: true };
+  } catch (error) {
+    console.error(
+      "loadLiveSignals: outcome_locked columns missing — run scripts/migration_signal_outcome_lock.sql; sticky lock disabled for now",
+      error
+    );
+    const { rows } = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (symbol)
+                ${BASE_COLUMNS}
+           FROM signals
+          WHERE status = 'active'
+          ORDER BY symbol, updated_at DESC
+       ) t
+       ORDER BY generated_at DESC, symbol`
+    );
+    return { rows, lockSupported: false };
+  }
+}
+
 export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
-  const { rows } = await getPool().query(
-    `SELECT * FROM (
-       SELECT DISTINCT ON (symbol)
-              symbol, name, signal_type, price,
-              entry_price, target_price, target_price_2, target_price_3, stop_price,
-              days_in, days_to_exit, status, generated_at, updated_at
-         FROM signals
-        WHERE status = 'active'
-        ORDER BY symbol, updated_at DESC
-     ) t
-     ORDER BY generated_at DESC, symbol`
-  );
+  const pool = getPool();
+  const { rows, lockSupported } = await queryActiveSignals(pool);
 
   let quotes = new Map<string, Quote>();
   let quotesOk = true;
@@ -129,6 +166,10 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
 
   const numOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
+  // Signals that just crossed a target or the stop for the first time this
+  // call — persisted below so the outcome never reverts on its own once set.
+  const newlyLocked: { id: string; outcome: "target_hit" | "stopped" }[] = [];
+
   const signals: LiveSignal[] = rows.map((r) => {
     const quote = quotes.get(r.symbol as string);
     const price = quote ? quote.ltp : Number(r.price) || 0;
@@ -139,6 +180,21 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     const target2 = numOrNull(r.target_price_2);
     const target3 = numOrNull(r.target_price_3);
     const stop = numOrNull(r.stop_price);
+
+    const locked = r.outcome_locked as "target_hit" | "stopped" | null | undefined;
+    let outcome: SignalOutcome;
+    if (locked === "stopped" || locked === "target_hit") {
+      // Already locked from a previous call — stays put regardless of what
+      // the current live price says, until an admin edits the signal.
+      outcome = locked;
+    } else {
+      const live = computeOutcome(signalType, price, [target, target2, target3], stop);
+      outcome = live;
+      if (lockSupported && (live === "stopped" || live === "target_hit")) {
+        newlyLocked.push({ id: r.id as string, outcome: live });
+      }
+    }
+
     return {
       symbol: r.symbol as string,
       name: (r.name ?? r.symbol) as string,
@@ -151,12 +207,37 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       target2,
       target3,
       stop,
-      outcome: computeOutcome(signalType, price, [target, target2, target3], stop),
+      outcome,
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,
       generatedAt: new Date(r.generated_at as string).toISOString(),
     };
   });
+
+  if (newlyLocked.length > 0) {
+    const stoppedIds = newlyLocked.filter((n) => n.outcome === "stopped").map((n) => n.id);
+    const targetHitIds = newlyLocked.filter((n) => n.outcome === "target_hit").map((n) => n.id);
+    try {
+      if (stoppedIds.length > 0) {
+        await pool.query(
+          `UPDATE signals SET outcome_locked = 'stopped', outcome_locked_at = now()
+            WHERE id = ANY($1) AND outcome_locked IS NULL`,
+          [stoppedIds]
+        );
+      }
+      if (targetHitIds.length > 0) {
+        await pool.query(
+          `UPDATE signals SET outcome_locked = 'target_hit', outcome_locked_at = now()
+            WHERE id = ANY($1) AND outcome_locked IS NULL`,
+          [targetHitIds]
+        );
+      }
+    } catch (error) {
+      // Non-fatal — the response already has the right outcome for this
+      // call; it just won't be locked in for next time until this succeeds.
+      console.error("loadLiveSignals: failed to persist outcome lock", error);
+    }
+  }
 
   return { signals, quotesOk };
 }
