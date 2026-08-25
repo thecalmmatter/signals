@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminUserId, isAdminUserId } from "@/lib/admin";
 import { isBillingEnabled } from "@/lib/access";
 import AdminBilling from "@/components/admin-billing";
 import AdminWaitlist from "@/components/admin-waitlist";
@@ -47,7 +47,8 @@ async function loadBilling() {
     const pool = getPool();
     const [usersRes, settingsRes] = await Promise.all([
       pool.query(
-        `SELECT id, email, subscription_status, trial_ends_at, razorpay_subscription_id, created_at
+        `SELECT id, email, first_name, last_name, subscription_status, trial_ends_at,
+                razorpay_subscription_id, created_at
            FROM users ORDER BY created_at DESC`
       ),
       pool.query("SELECT default_trial_ends_at FROM app_settings WHERE id = 1"),
@@ -56,6 +57,9 @@ async function loadBilling() {
       users: usersRes.rows.map((r) => ({
         id: r.id,
         email: r.email,
+        firstName: r.first_name as string | null,
+        lastName: r.last_name as string | null,
+        isAdmin: isAdminUserId(r.id as string),
         subscriptionStatus: r.subscription_status,
         trialEndsAt: r.trial_ends_at,
         razorpaySubscriptionId: r.razorpay_subscription_id,
@@ -112,7 +116,12 @@ export default async function AdminUsersPage() {
               the var) and redeploy to re-enable the paywall.
             </div>
           )}
-          <AdminBilling initialUsers={billing.users} initialDefaultTrialEndsAt={billing.defaultTrialEndsAt} />
+          <AdminBilling
+            initialUsers={billing.users}
+            initialDefaultTrialEndsAt={billing.defaultTrialEndsAt}
+            currentAdminId={adminId}
+            billingEnabled={isBillingEnabled()}
+          />
         </div>
 
         <div className="mt-8">

@@ -73,6 +73,32 @@ export async function fetchSubscription(id: string): Promise<RazorpaySubscriptio
   return (await res.json()) as RazorpaySubscription;
 }
 
+/**
+ * Actually stops billing on Razorpay's side — flipping our local
+ * subscription_status to "cancelled" alone doesn't touch the real
+ * subscription, so it would keep renewing/charging until this is called too.
+ * `cancelAtCycleEnd = false` cancels immediately (default); `true` lets the
+ * current paid cycle run out first.
+ */
+export async function cancelSubscription(
+  id: string,
+  cancelAtCycleEnd = false
+): Promise<RazorpaySubscription> {
+  const res = await fetch(`${API_BASE}/subscriptions/${id}/cancel`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader(),
+    },
+    body: JSON.stringify({ cancel_at_cycle_end: cancelAtCycleEnd ? 1 : 0 }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new RazorpayError(`razorpay cancel subscription ${res.status}: ${detail.slice(0, 300)}`, res.status);
+  }
+  return (await res.json()) as RazorpaySubscription;
+}
+
 function hmacHex(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("hex");
 }

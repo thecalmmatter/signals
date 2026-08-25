@@ -17,3 +17,9 @@ export async function getAdminUserId(): Promise<string | null> {
   if (!userId) return null;
   return ADMIN_IDS.has(userId) ? userId : null;
 }
+
+/** Sync, no-auth-lookup check — for tagging *other* users' rows (e.g. in the
+ *  user management table) against ADMIN_USER_IDS, not for gating access. */
+export function isAdminUserId(id: string): boolean {
+  return ADMIN_IDS.has(id);
+}
