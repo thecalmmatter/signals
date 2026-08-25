@@ -12,6 +12,21 @@ export type WaitlistRow = {
 const btnCls =
   "rounded-md px-2.5 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50";
 
+// Explicit locale + format — Date#toLocaleString() with no args uses the
+// runtime's default locale, which differs between the server (Node's
+// system locale) and the browser (the visitor's locale), producing
+// different strings for the same Date and triggering a hydration mismatch.
+// Pinning both to "en-IN" keeps SSR and the client in agreement.
+function dateTimeFmt(iso: string): string {
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function AdminWaitlist({ rows: initial }: { rows: WaitlistRow[] }) {
   const [rows, setRows] = useState<WaitlistRow[]>(initial);
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -73,7 +88,7 @@ export default function AdminWaitlist({ rows: initial }: { rows: WaitlistRow[] }
                 <td className="px-3 py-2.5 text-zinc-200">{r.email}</td>
                 <td className="px-3 py-2.5 text-xs text-zinc-400">{r.source ?? "—"}</td>
                 <td className="px-3 py-2.5 text-xs text-zinc-400">
-                  {new Date(r.createdAt).toLocaleString()}
+                  {dateTimeFmt(r.createdAt)}
                 </td>
                 <td className="px-3 py-2.5">
                   {r.invitedAt ? (
