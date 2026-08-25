@@ -447,18 +447,46 @@ export function SignalDetailModal({
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-zinc-800 pt-4 text-sm">
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-zinc-800 pt-4 text-sm">
             <div>
               <p className="text-[10px] uppercase tracking-wide text-zinc-500">Entry</p>
               <p className="font-semibold tabular-nums text-zinc-50">{inr(stock.entry)}</p>
             </div>
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-zinc-500">Target</p>
-              <p className={cn("font-semibold tabular-nums", tone.target)}>{inr(stock.target)}</p>
-            </div>
-            <div>
               <p className="text-[10px] uppercase tracking-wide text-zinc-500">Stop</p>
               <p className="font-semibold tabular-nums text-zinc-50">{inr(stock.stop)}</p>
+            </div>
+          </div>
+
+          <div className="mt-3 border-t border-zinc-800 pt-3">
+            <p className="mb-2 text-[10px] uppercase tracking-wide text-zinc-500">Targets</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {(
+                [
+                  { label: "T1 — short-term", value: stock.target },
+                  { label: "T2 — medium-term", value: stock.target2 },
+                  { label: "T3 — long-term", value: stock.target3 },
+                ] as { label: string; value: number | null | undefined }[]
+              )
+                .filter((t) => t.value)
+                .map((t) => {
+                  const value = t.value as number;
+                  const reached =
+                    stock.signal === "buy" ? stock.price >= value : stock.signal === "sell" ? stock.price <= value : null;
+                  return (
+                    <div key={t.label} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 sm:flex-col sm:items-start">
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">{t.label}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={cn("font-semibold tabular-nums", tone.target)}>{inr(value)}</span>
+                        {reached && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-400 ring-1 ring-inset ring-emerald-400/30">
+                            reached
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           </div>
 

@@ -15,12 +15,22 @@ const inputCls =
 const btnCls =
   "rounded-md px-2 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50";
 
-type Draft = { entry: string; target: string; stop: string; exit: string; notes: string };
+type Draft = {
+  entry: string;
+  target: string;
+  target2: string;
+  target3: string;
+  stop: string;
+  exit: string;
+  notes: string;
+};
 type AddForm = {
   symbol: string;
   direction: "buy" | "sell";
   entry: string;
   target: string;
+  target2: string;
+  target3: string;
   stop: string;
   openedAt: string;
   notes: string;
@@ -31,6 +41,8 @@ const emptyAddForm: AddForm = {
   direction: "buy",
   entry: "",
   target: "",
+  target2: "",
+  target3: "",
   stop: "",
   openedAt: "",
   notes: "",
@@ -40,10 +52,58 @@ function draftFrom(p: AdminPosition): Draft {
   return {
     entry: p.entryPrice?.toString() ?? "",
     target: p.targetPrice?.toString() ?? "",
+    target2: p.targetPrice2?.toString() ?? "",
+    target3: p.targetPrice3?.toString() ?? "",
     stop: p.stopPrice?.toString() ?? "",
     exit: p.exitPrice?.toString() ?? "",
     notes: p.notes ?? "",
   };
+}
+
+// One target's price input + independent hit toggle — used for T1/T2/T3.
+// Hitting a target doesn't change the position's overall status (that's
+// still driven by the Hit target/Hit stop/Close buttons) — this is purely
+// "did price reach this waypoint," tracked per-target.
+function TargetCell({
+  value,
+  onChange,
+  hitAt,
+  onToggleHit,
+  busy,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  hitAt: string | null;
+  onToggleHit: (hit: boolean) => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <input
+        className={inputCls}
+        type="number"
+        step="any"
+        placeholder="—"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {value !== "" && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onToggleHit(!hitAt)}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            hitAt
+              ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-inset ring-emerald-400/30"
+              : "border border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-400"
+          }`}
+          title={hitAt ? `Hit ${new Date(hitAt).toLocaleDateString("en-IN")} — click to unmark` : "Mark as hit"}
+        >
+          {hitAt ? "hit ✓" : "mark hit"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export default function AdminPositions({
@@ -114,10 +174,21 @@ export default function AdminPositions({
       await patch(id, {
         entryPrice: d.entry === "" ? null : Number(d.entry),
         targetPrice: d.target === "" ? null : Number(d.target),
+        targetPrice2: d.target2 === "" ? null : Number(d.target2),
+        targetPrice3: d.target3 === "" ? null : Number(d.target3),
         stopPrice: d.stop === "" ? null : Number(d.stop),
         exitPrice: d.exit === "" ? null : Number(d.exit),
         notes: d.notes,
       });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function toggleTargetHit(id: string, target: 1 | 2 | 3, hit: boolean) {
+    setError(null);
+    try {
+      await patch(id, { [`target${target}Hit`]: hit });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -164,6 +235,8 @@ export default function AdminPositions({
           direction: addForm.direction,
           entryPrice: Number(addForm.entry),
           targetPrice: Number(addForm.target),
+          targetPrice2: addForm.target2 === "" ? null : Number(addForm.target2),
+          targetPrice3: addForm.target3 === "" ? null : Number(addForm.target3),
           stopPrice: Number(addForm.stop),
           openedAt: addForm.openedAt || null,
           notes: addForm.notes || null,
@@ -262,13 +335,33 @@ export default function AdminPositions({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Target
+            Target (T1)
             <input
               className={inputCls}
               type="number"
               step="any"
               value={addForm.target}
               onChange={(e) => setAddForm((f) => ({ ...f, target: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            T2 <span className="text-zinc-600">(optional)</span>
+            <input
+              className={inputCls}
+              type="number"
+              step="any"
+              value={addForm.target2}
+              onChange={(e) => setAddForm((f) => ({ ...f, target2: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            T3 <span className="text-zinc-600">(optional)</span>
+            <input
+              className={inputCls}
+              type="number"
+              step="any"
+              value={addForm.target3}
+              onChange={(e) => setAddForm((f) => ({ ...f, target3: e.target.value }))}
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
@@ -311,7 +404,7 @@ export default function AdminPositions({
 
       {/* Table */}
       <section className="overflow-x-auto rounded-xl border border-zinc-800">
-        <table className="w-full min-w-[1000px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1200px] border-collapse text-left text-sm">
           <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2.5">Symbol</th>
@@ -319,7 +412,9 @@ export default function AdminPositions({
               <th className="px-3 py-2.5">Source</th>
               <th className="px-3 py-2.5">Posted</th>
               <th className="px-3 py-2.5">Entry</th>
-              <th className="px-3 py-2.5">Target</th>
+              <th className="px-3 py-2.5">T1</th>
+              <th className="px-3 py-2.5">T2</th>
+              <th className="px-3 py-2.5">T3</th>
               <th className="px-3 py-2.5">Stop</th>
               <th className="px-3 py-2.5">Exit</th>
               <th className="px-3 py-2.5">Return</th>
@@ -332,7 +427,7 @@ export default function AdminPositions({
           <tbody className="divide-y divide-zinc-800/60">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={15} className="px-3 py-8 text-center text-zinc-500">
                   No positions logged yet.
                 </td>
               </tr>
@@ -381,12 +476,30 @@ export default function AdminPositions({
                     />
                   </td>
                   <td className="px-3 py-2.5">
-                    <input
-                      className={inputCls}
-                      type="number"
-                      step="any"
+                    <TargetCell
                       value={d?.target ?? ""}
-                      onChange={(e) => setDraft(r.id, "target", e.target.value)}
+                      onChange={(v) => setDraft(r.id, "target", v)}
+                      hitAt={r.target1HitAt}
+                      onToggleHit={(hit) => toggleTargetHit(r.id, 1, hit)}
+                      busy={busy.has(r.id)}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <TargetCell
+                      value={d?.target2 ?? ""}
+                      onChange={(v) => setDraft(r.id, "target2", v)}
+                      hitAt={r.target2HitAt}
+                      onToggleHit={(hit) => toggleTargetHit(r.id, 2, hit)}
+                      busy={busy.has(r.id)}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <TargetCell
+                      value={d?.target3 ?? ""}
+                      onChange={(v) => setDraft(r.id, "target3", v)}
+                      hitAt={r.target3HitAt}
+                      onToggleHit={(hit) => toggleTargetHit(r.id, 3, hit)}
+                      busy={busy.has(r.id)}
                     />
                   </td>
                   <td className="px-3 py-2.5">

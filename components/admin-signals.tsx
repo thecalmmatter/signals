@@ -18,8 +18,18 @@ const inputCls =
 const btnCls =
   "rounded-md px-2 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50";
 
-type Draft = { entry: string; target: string; stop: string; notes: string };
-type AddForm = { symbol: string; type: "buy" | "sell"; entry: string; target: string; stop: string };
+type Draft = { entry: string; target: string; target2: string; target3: string; stop: string; notes: string };
+type AddForm = {
+  symbol: string;
+  type: "buy" | "sell";
+  entry: string;
+  target: string;
+  target2: string;
+  target3: string;
+  stop: string;
+};
+
+const emptyAddForm: AddForm = { symbol: "", type: "buy", entry: "", target: "", target2: "", target3: "", stop: "" };
 
 export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
   const [rows, setRows] = useState<AdminSignal[]>(signals);
@@ -30,6 +40,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
         {
           entry: s.entryPrice?.toString() ?? "",
           target: s.targetPrice?.toString() ?? "",
+          target2: s.targetPrice2?.toString() ?? "",
+          target3: s.targetPrice3?.toString() ?? "",
           stop: s.stopPrice?.toString() ?? "",
           notes: s.notes ?? "",
         },
@@ -38,7 +50,7 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
-  const [addForm, setAddForm] = useState<AddForm>({ symbol: "", type: "buy", entry: "", target: "", stop: "" });
+  const [addForm, setAddForm] = useState<AddForm>(emptyAddForm);
   const [justPrefilled, setJustPrefilled] = useState(false);
 
   // Listens for "Add" clicks from the webhook activity feed below (see
@@ -90,6 +102,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
       await patch(id, {
         entryPrice: d.entry === "" ? null : Number(d.entry),
         targetPrice: d.target === "" ? null : Number(d.target),
+        targetPrice2: d.target2 === "" ? null : Number(d.target2),
+        targetPrice3: d.target3 === "" ? null : Number(d.target3),
         stopPrice: d.stop === "" ? null : Number(d.stop),
         notes: d.notes,
       });
@@ -138,6 +152,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
           type: addForm.type,
           entryPrice: addForm.entry === "" ? null : Number(addForm.entry),
           targetPrice: addForm.target === "" ? null : Number(addForm.target),
+          targetPrice2: addForm.target2 === "" ? null : Number(addForm.target2),
+          targetPrice3: addForm.target3 === "" ? null : Number(addForm.target3),
           stopPrice: addForm.stop === "" ? null : Number(addForm.stop),
         }),
       });
@@ -156,11 +172,13 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
         [data.signal.id]: {
           entry: data.signal.entryPrice?.toString() ?? "",
           target: data.signal.targetPrice?.toString() ?? "",
+          target2: data.signal.targetPrice2?.toString() ?? "",
+          target3: data.signal.targetPrice3?.toString() ?? "",
           stop: data.signal.stopPrice?.toString() ?? "",
           notes: "",
         },
       }));
-      setAddForm({ symbol: "", type: "buy", entry: "", target: "", stop: "" });
+      setAddForm(emptyAddForm);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -219,13 +237,33 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Target
+            Target (T1)
             <input
               className={inputCls}
               type="number"
               step="any"
               value={addForm.target}
               onChange={(e) => setAddForm((f) => ({ ...f, target: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            T2 <span className="text-zinc-600">(optional)</span>
+            <input
+              className={inputCls}
+              type="number"
+              step="any"
+              value={addForm.target2}
+              onChange={(e) => setAddForm((f) => ({ ...f, target2: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            T3 <span className="text-zinc-600">(optional)</span>
+            <input
+              className={inputCls}
+              type="number"
+              step="any"
+              value={addForm.target3}
+              onChange={(e) => setAddForm((f) => ({ ...f, target3: e.target.value }))}
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
@@ -249,7 +287,7 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
 
       {/* Table */}
       <section className="overflow-x-auto rounded-xl border border-zinc-800">
-        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
           <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2.5">Symbol</th>
@@ -257,7 +295,9 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
               <th className="px-3 py-2.5">Source</th>
               <th className="px-3 py-2.5">Triggered</th>
               <th className="px-3 py-2.5">Entry</th>
-              <th className="px-3 py-2.5">Target</th>
+              <th className="px-3 py-2.5">T1</th>
+              <th className="px-3 py-2.5">T2</th>
+              <th className="px-3 py-2.5">T3</th>
               <th className="px-3 py-2.5">Stop</th>
               <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Notes</th>
@@ -267,7 +307,7 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
           <tbody className="divide-y divide-zinc-800/60">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={12} className="px-3 py-8 text-center text-zinc-500">
                   No signals yet.
                 </td>
               </tr>
@@ -312,6 +352,26 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
                       step="any"
                       value={d?.target ?? ""}
                       onChange={(e) => setDraft(r.id, "target", e.target.value)}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <input
+                      className={inputCls}
+                      type="number"
+                      step="any"
+                      placeholder="—"
+                      value={d?.target2 ?? ""}
+                      onChange={(e) => setDraft(r.id, "target2", e.target.value)}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <input
+                      className={inputCls}
+                      type="number"
+                      step="any"
+                      placeholder="—"
+                      value={d?.target3 ?? ""}
+                      onChange={(e) => setDraft(r.id, "target3", e.target.value)}
                     />
                   </td>
                   <td className="px-3 py-2.5">

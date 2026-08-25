@@ -44,6 +44,8 @@ export async function GET() {
       change: s.change,
       entry: s.entry ?? 0,
       target: s.target ?? 0,
+      target2: s.target2,
+      target3: s.target3,
       stop: s.stop ?? 0,
       // No longer shown on the ticker, but the chat feature still uses
       // this as background context — keep it populated, just not rendered.
@@ -81,9 +83,13 @@ export async function POST(req: Request) {
 
   const entry = goodNum(body.entryPrice);
   const target = goodNum(body.targetPrice);
+  const target2 = goodNum(body.targetPrice2);
+  const target3 = goodNum(body.targetPrice3);
   const stop = goodNum(body.stopPrice);
   if (entry === "invalid") return json({ error: "invalid entryPrice" }, 400);
   if (target === "invalid") return json({ error: "invalid targetPrice" }, 400);
+  if (target2 === "invalid") return json({ error: "invalid targetPrice2" }, 400);
+  if (target3 === "invalid") return json({ error: "invalid targetPrice3" }, 400);
   if (stop === "invalid") return json({ error: "invalid stopPrice" }, 400);
   const notes = body.notes === undefined || body.notes === null ? null : String(body.notes);
 
@@ -106,21 +112,22 @@ export async function POST(req: Request) {
     id = existing.rows[0].id;
     await pool.query(
       `UPDATE signals
-          SET signal_type = $1, entry_price = $2, target_price = $3, stop_price = $4,
-              source = 'manual', updated_by = $5, notes = $6, updated_at = now()
-        WHERE id = $7`,
-      [type, entry, target, stop, adminId, notes, id]
+          SET signal_type = $1, entry_price = $2, target_price = $3, target_price_2 = $4,
+              target_price_3 = $5, stop_price = $6,
+              source = 'manual', updated_by = $7, notes = $8, updated_at = now()
+        WHERE id = $9`,
+      [type, entry, target, target2, target3, stop, adminId, notes, id]
     );
     eventType = "manual_edited";
     eventDetail = `manual add re-used existing active row (entry=${entry}, target=${target}, stop=${stop})`;
   } else {
     const inserted = await pool.query<{ id: string }>(
       `INSERT INTO signals
-         (symbol, name, signal_type, entry_price, target_price, stop_price,
+         (symbol, name, signal_type, entry_price, target_price, target_price_2, target_price_3, stop_price,
           source, updated_by, notes, status, generated_at, updated_at, days_in)
-       VALUES ($1, $1, $2, $3, $4, $5, 'manual', $6, $7, 'active', now(), now(), 0)
+       VALUES ($1, $1, $2, $3, $4, $5, $6, $7, 'manual', $8, $9, 'active', now(), now(), 0)
        RETURNING id`,
-      [symbol, type, entry, target, stop, adminId, notes]
+      [symbol, type, entry, target, target2, target3, stop, adminId, notes]
     );
     id = inserted.rows[0].id;
     eventType = "manual_created";
@@ -144,6 +151,8 @@ export async function POST(req: Request) {
         direction: type as "buy" | "sell",
         entryPrice: entry,
         targetPrice: target,
+        targetPrice2: target2,
+        targetPrice3: target3,
         stopPrice: stop,
         openedAt: null,
         createdBy: adminId,

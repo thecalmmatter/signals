@@ -24,7 +24,12 @@ export type LiveSignal = {
   changePct: number;
   change: number;
   entry: number | null;
+  /** T1 / short-term target. */
   target: number | null;
+  /** T2 / medium-term target — not every signal has one yet. */
+  target2: number | null;
+  /** T3 / long-term target — not every signal has one yet. */
+  target3: number | null;
   stop: number | null;
   daysIn: number;
   daysToExit: number;
@@ -59,8 +64,8 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     `SELECT * FROM (
        SELECT DISTINCT ON (symbol)
               symbol, name, signal_type, price,
-              entry_price, target_price, stop_price, days_in, days_to_exit,
-              status, generated_at, updated_at
+              entry_price, target_price, target_price_2, target_price_3, stop_price,
+              days_in, days_to_exit, status, generated_at, updated_at
          FROM signals
         WHERE status = 'active'
         ORDER BY symbol, updated_at DESC
@@ -93,6 +98,8 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       change,
       entry: numOrNull(r.entry_price),
       target: numOrNull(r.target_price),
+      target2: numOrNull(r.target_price_2),
+      target3: numOrNull(r.target_price_3),
       stop: numOrNull(r.stop_price),
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,

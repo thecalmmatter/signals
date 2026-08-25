@@ -13,6 +13,17 @@ const inr = (n: number) =>
 const pct = (n: number) =>
   n === 0 ? "0.0%" : `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 
+// Compact "T1 355 · T2 410 · T3 480" — T2/T3 only shown once set, so this
+// stays one line inside the card's fixed-height back face regardless of how
+// many targets a signal actually has (no card resize / marquee change
+// needed for the common case of just T1).
+function formatTargets(stock: TickerStock) {
+  const parts = [`T1 ${stock.target.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`];
+  if (stock.target2) parts.push(`T2 ${stock.target2.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`);
+  if (stock.target3) parts.push(`T3 ${stock.target3.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`);
+  return parts.join(" · ");
+}
+
 function cn(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
 }
@@ -151,10 +162,13 @@ function TickerCard({
                       {inr(stock.entry)}
                     </span>
                   </span>
-                  <span className="flex items-baseline justify-between">
-                    <span className="text-zinc-500">Target</span>
-                    <span className={cn("font-semibold tabular-nums", tone.target)}>
-                      {inr(stock.target)}
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="shrink-0 text-zinc-500">Targets</span>
+                    <span
+                      className={cn("truncate text-right font-semibold tabular-nums", tone.target)}
+                      title={formatTargets(stock)}
+                    >
+                      {formatTargets(stock)}
                     </span>
                   </span>
                   <span className="flex items-baseline justify-between">

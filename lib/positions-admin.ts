@@ -7,8 +7,10 @@ import type { Pool } from "pg";
 import { getQuotes } from "./fyers";
 
 export const POSITION_COLUMNS = `
-  id, signal_id, symbol, direction, entry_price, target_price, stop_price, exit_price,
-  status, opened_at, closed_at, notes, created_by, created_at, updated_at
+  id, signal_id, symbol, direction, entry_price,
+  target_price, target_price_2, target_price_3, stop_price, exit_price,
+  status, opened_at, closed_at, notes, created_by, created_at, updated_at,
+  target_1_hit_at, target_2_hit_at, target_3_hit_at
 `;
 
 export type AdminPosition = {
@@ -17,7 +19,12 @@ export type AdminPosition = {
   symbol: string;
   direction: "buy" | "sell";
   entryPrice: number;
+  /** T1 / short-term target. */
   targetPrice: number;
+  /** T2 / medium-term target — not every position has one yet. */
+  targetPrice2: number | null;
+  /** T3 / long-term target — not every position has one yet. */
+  targetPrice3: number | null;
   stopPrice: number;
   exitPrice: number | null;
   status: "open" | "hit_target" | "hit_stop" | "closed_manual";
@@ -27,6 +34,14 @@ export type AdminPosition = {
   createdBy: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /**
+   * Independent per-target hit tracking — a position can have T1 hit while
+   * still open, waiting on T2/T3 or the stop. Separate from `status`, which
+   * still tracks the overall open/hit_stop/closed_manual outcome.
+   */
+  target1HitAt: string | null;
+  target2HitAt: string | null;
+  target3HitAt: string | null;
 };
 
 function fmtDate(v: unknown): string | null {
@@ -34,6 +49,11 @@ function fmtDate(v: unknown): string | null {
   const d = new Date(v as string | number | Date);
   if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return String(v).slice(0, 10);
+}
+
+function fmtTimestamp(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  return new Date(v as string | number | Date).toISOString();
 }
 
 export function mapPositionRow(row: Record<string, unknown>): AdminPosition {
@@ -46,6 +66,8 @@ export function mapPositionRow(row: Record<string, unknown>): AdminPosition {
     direction: row.direction as "buy" | "sell",
     entryPrice: num(row.entry_price),
     targetPrice: num(row.target_price),
+    targetPrice2: numOrNull(row.target_price_2),
+    targetPrice3: numOrNull(row.target_price_3),
     stopPrice: num(row.stop_price),
     exitPrice: numOrNull(row.exit_price),
     status: row.status as AdminPosition["status"],
@@ -55,6 +77,9 @@ export function mapPositionRow(row: Record<string, unknown>): AdminPosition {
     createdBy: row.created_by as string | null,
     createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : null,
     updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : null,
+    target1HitAt: fmtTimestamp(row.target_1_hit_at),
+    target2HitAt: fmtTimestamp(row.target_2_hit_at),
+    target3HitAt: fmtTimestamp(row.target_3_hit_at),
   };
 }
 
@@ -133,6 +158,8 @@ export async function upsertPositionFromSignal(
     direction: "buy" | "sell";
     entryPrice: number;
     targetPrice: number;
+    targetPrice2?: number | null;
+    targetPrice3?: number | null;
     stopPrice: number;
     openedAt: string | null; // signal's trigger_date, if any — falls back to CURRENT_DATE
     createdBy: string | null;
@@ -140,24 +167,48 @@ export async function upsertPositionFromSignal(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO positions
-       (signal_id, symbol, direction, entry_price, target_price, stop_price, created_by, opened_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE))
+       (signal_id, symbol, direction, entry_price, target_price, target_price_2, target_price_3,
+        stop_price, created_by, opened_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, CURRENT_DATE))
      ON CONFLICT (signal_id) WHERE signal_id IS NOT NULL DO UPDATE SET
-       symbol       = EXCLUDED.symbol,
-       direction    = EXCLUDED.direction,
-       entry_price  = EXCLUDED.entry_price,
-       target_price = EXCLUDED.target_price,
-       stop_price   = EXCLUDED.stop_price,
-       updated_at   = now()`,
+       symbol         = EXCLUDED.symbol,
+       direction      = EXCLUDED.direction,
+       entry_price    = EXCLUDED.entry_price,
+       target_price   = EXCLUDED.target_price,
+       target_price_2 = EXCLUDED.target_price_2,
+       target_price_3 = EXCLUDED.target_price_3,
+       stop_price     = EXCLUDED.stop_price,
+       updated_at     = now()`,
     [
       params.signalId,
       params.symbol,
       params.direction,
       params.entryPrice,
       params.targetPrice,
+      params.targetPrice2 ?? null,
+      params.targetPrice3 ?? null,
       params.stopPrice,
       params.createdBy,
       params.openedAt,
     ]
+  );
+}
+
+/**
+ * Marks (or unmarks) one of the three independent target-hit timestamps on a
+ * position. Doesn't touch `status` — hitting T1 doesn't necessarily close
+ * the position (partial-profit-booking style trading), only hitting the
+ * stop or an explicit manual close does.
+ */
+export async function setTargetHit(
+  pool: Pool,
+  id: string,
+  target: 1 | 2 | 3,
+  hit: boolean
+): Promise<void> {
+  const col = `target_${target}_hit_at`;
+  await pool.query(
+    `UPDATE positions SET ${col} = ${hit ? "now()" : "NULL"}, updated_at = now() WHERE id = $1`,
+    [id]
   );
 }

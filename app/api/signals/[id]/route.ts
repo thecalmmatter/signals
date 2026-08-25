@@ -57,6 +57,8 @@ export async function PATCH(
   for (const [key, col] of [
     ["entryPrice", "entry_price"],
     ["targetPrice", "target_price"],
+    ["targetPrice2", "target_price_2"],
+    ["targetPrice3", "target_price_3"],
     ["stopPrice", "stop_price"],
   ] as const) {
     if (body[key] === undefined) continue;
@@ -82,6 +84,8 @@ export async function PATCH(
   }
   if (body.entryPrice !== undefined) changes.push(`entry=${body.entryPrice}`);
   if (body.targetPrice !== undefined) changes.push(`target=${body.targetPrice}`);
+  if (body.targetPrice2 !== undefined) changes.push(`target2=${body.targetPrice2}`);
+  if (body.targetPrice3 !== undefined) changes.push(`target3=${body.targetPrice3}`);
   if (body.stopPrice !== undefined) changes.push(`stop=${body.stopPrice}`);
   if (body.notes !== undefined) changes.push("notes");
   const detail = changes.length ? changes.join("; ") : "no fields changed";
@@ -110,6 +114,8 @@ export async function PATCH(
         direction: fresh.signal_type as "buy" | "sell",
         entryPrice: Number(fresh.entry_price),
         targetPrice: Number(fresh.target_price),
+        targetPrice2: fresh.target_price_2 === null ? null : Number(fresh.target_price_2),
+        targetPrice3: fresh.target_price_3 === null ? null : Number(fresh.target_price_3),
         stopPrice: Number(fresh.stop_price),
         openedAt: fresh.trigger_date as string | null,
         createdBy: adminId,

@@ -12,7 +12,12 @@ export type TickerStock = {
   /** Days remaining until the setup's expected exit. */
   daysToExit: number;
   entry: number;
+  /** T1 / short-term target. */
   target: number;
+  /** T2 / medium-term target — not every signal has one yet. */
+  target2?: number | null;
+  /** T3 / long-term target — not every signal has one yet. */
+  target3?: number | null;
   stop: number;
 };
 

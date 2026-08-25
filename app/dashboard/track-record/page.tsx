@@ -23,6 +23,27 @@ function returnPct(s: LiveSignal): number | null {
   return s.signal === "sell" ? -raw : raw;
 }
 
+// Has the live price crossed this target, in the trade's favorable
+// direction? null for "watch" signals (no direction to judge against).
+// Purely derived from the live quote already merged into LiveSignal —
+// nothing stored, so it's always accurate to what's live right now.
+function targetReached(s: LiveSignal, value: number): boolean | null {
+  if (s.signal === "buy") return s.price >= value;
+  if (s.signal === "sell") return s.price <= value;
+  return null;
+}
+
+function TargetCell({ s, value }: { s: LiveSignal; value: number | null }) {
+  if (!value) return <span className="text-zinc-600">—</span>;
+  const reached = targetReached(s, value);
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="tabular-nums text-zinc-300">{inr(value)}</span>
+      {reached && <span className="text-emerald-400" title="Live price has reached this target">✓</span>}
+    </span>
+  );
+}
+
 export default async function TrackRecordPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
@@ -99,14 +120,16 @@ export default async function TrackRecordPage() {
         </div>
 
         <section className="overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full min-w-[880px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
             <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
                 <th className="px-3 py-2.5">Symbol</th>
                 <th className="px-3 py-2.5">Dir</th>
                 <th className="px-3 py-2.5">Since</th>
                 <th className="px-3 py-2.5">Entry</th>
-                <th className="px-3 py-2.5">Target</th>
+                <th className="px-3 py-2.5">T1</th>
+                <th className="px-3 py-2.5">T2</th>
+                <th className="px-3 py-2.5">T3</th>
                 <th className="px-3 py-2.5">Stop</th>
                 <th className="px-3 py-2.5">Live</th>
                 <th className="px-3 py-2.5">Return</th>
@@ -116,7 +139,7 @@ export default async function TrackRecordPage() {
             <tbody className="divide-y divide-zinc-800/60">
               {signals.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-zinc-500">
+                  <td colSpan={11} className="px-3 py-8 text-center text-zinc-500">
                     No live signals right now.
                   </td>
                 </tr>
@@ -145,8 +168,14 @@ export default async function TrackRecordPage() {
                     <td className="px-3 py-2.5 tabular-nums text-zinc-300">
                       {s.entry ? inr(s.entry) : "—"}
                     </td>
-                    <td className="px-3 py-2.5 tabular-nums text-zinc-300">
-                      {s.target ? inr(s.target) : "—"}
+                    <td className="px-3 py-2.5">
+                      <TargetCell s={s} value={s.target} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <TargetCell s={s} value={s.target2} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <TargetCell s={s} value={s.target3} />
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-300">
                       {s.stop ? inr(s.stop) : "—"}

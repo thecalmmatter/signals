@@ -59,6 +59,7 @@ psql "$DATABASE_URL" -f scripts/migration_waitlist.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist_invite.sql
 psql "$DATABASE_URL" -f scripts/migration_positions.sql
 psql "$DATABASE_URL" -f scripts/migration_positions_signal_link.sql
+psql "$DATABASE_URL" -f scripts/migration_multi_target.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live

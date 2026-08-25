@@ -2,7 +2,7 @@
 
 export const ADMIN_COLUMNS = `
   id, symbol, name, signal_type, price,
-  entry_price, target_price, stop_price,
+  entry_price, target_price, target_price_2, target_price_3, stop_price,
   status, source, trigger_date, scan_name, notes, updated_by, updated_at
 `;
 
@@ -13,7 +13,12 @@ export type AdminSignal = {
   signalType: "buy" | "sell";
   price: number | null;
   entryPrice: number | null;
+  /** T1 / short-term target. */
   targetPrice: number | null;
+  /** T2 / medium-term target. */
+  targetPrice2: number | null;
+  /** T3 / long-term target. */
+  targetPrice3: number | null;
   stopPrice: number | null;
   status: string;
   source: "webhook" | "manual";
@@ -41,6 +46,8 @@ export function mapAdminRow(row: Record<string, unknown>): AdminSignal {
     price: num(row.price),
     entryPrice: num(row.entry_price),
     targetPrice: num(row.target_price),
+    targetPrice2: num(row.target_price_2),
+    targetPrice3: num(row.target_price_3),
     stopPrice: num(row.stop_price),
     status: String(row.status),
     source: row.source as "webhook" | "manual",

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
-import { POSITION_COLUMNS, mapPositionRow } from "@/lib/positions-admin";
+import { POSITION_COLUMNS, mapPositionRow, setTargetHit } from "@/lib/positions-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +52,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   for (const [key, col] of [
     ["entryPrice", "entry_price"],
     ["targetPrice", "target_price"],
+    ["targetPrice2", "target_price_2"],
+    ["targetPrice3", "target_price_3"],
     ["stopPrice", "stop_price"],
     ["exitPrice", "exit_price"],
   ] as const) {
@@ -75,10 +77,27 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     sets.push(`notes = ${P(v)}`);
   }
 
-  if (sets.length === 0) return json({ error: "no fields to update" }, 400);
+  // Independent per-target hit markers — { target1Hit: true|false, ... }.
+  // Separate UPDATEs via setTargetHit (not part of the dynamic `sets` above)
+  // since they don't touch `status`: T1 can be marked hit while the
+  // position stays open, waiting on T2/T3 or the stop.
+  let targetHitChanged = false;
+  for (const [key, target] of [
+    ["target1Hit", 1],
+    ["target2Hit", 2],
+    ["target3Hit", 3],
+  ] as const) {
+    if (body[key] === undefined) continue;
+    await setTargetHit(pool, id, target, Boolean(body[key]));
+    targetHitChanged = true;
+  }
 
-  sets.push(`updated_at = now()`);
-  await pool.query(`UPDATE positions SET ${sets.join(", ")} WHERE id = ${P(id)}`, vals);
+  if (sets.length === 0 && !targetHitChanged) return json({ error: "no fields to update" }, 400);
+
+  if (sets.length > 0) {
+    sets.push(`updated_at = now()`);
+    await pool.query(`UPDATE positions SET ${sets.join(", ")} WHERE id = ${P(id)}`, vals);
+  }
 
   const updated = await pool.query(`SELECT ${POSITION_COLUMNS} FROM positions WHERE id = $1`, [id]);
   return json({ position: mapPositionRow(updated.rows[0]) }, 200);

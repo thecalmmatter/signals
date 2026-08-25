@@ -7,9 +7,19 @@ export const dynamic = "force-dynamic";
 
 const json = (body: unknown, status: number) => NextResponse.json(body, { status });
 
+// Required — entry/target/stop are NOT NULL columns.
 function goodNum(v: unknown): number | "invalid" {
   const n = Number(v);
   return v !== null && v !== undefined && v !== "" && Number.isFinite(n) ? n : "invalid";
+}
+
+// Optional — target_price_2/3 are nullable (not every position has a
+// medium/long-term target set). Missing/empty is valid (null), only a
+// genuinely non-numeric value is an error.
+function optionalNum(v: unknown): number | null | "invalid" {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : "invalid";
 }
 
 // List the track record (admin only — this is the internal ledger, not a
@@ -55,16 +65,25 @@ export async function POST(req: Request) {
   if (target === "invalid") return json({ error: "targetPrice is required and must be a number" }, 400);
   if (stop === "invalid") return json({ error: "stopPrice is required and must be a number" }, 400);
 
+  // T2/T3 are optional — not every position has a medium/long-term target
+  // set yet. null (unset) is valid; only a genuinely non-numeric value is an
+  // error, so goodNum's null-if-empty-or-missing behavior is exactly right.
+  const target2 = optionalNum(body.targetPrice2);
+  const target3 = optionalNum(body.targetPrice3);
+  if (target2 === "invalid") return json({ error: "invalid targetPrice2" }, 400);
+  if (target3 === "invalid") return json({ error: "invalid targetPrice3" }, 400);
+
   const notes = body.notes === undefined || body.notes === null ? null : String(body.notes);
   const openedAt = body.openedAt ? String(body.openedAt) : null;
 
   const pool = getPool();
   const inserted = await pool.query<{ id: string }>(
     `INSERT INTO positions
-       (symbol, direction, entry_price, target_price, stop_price, notes, created_by, opened_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE))
+       (symbol, direction, entry_price, target_price, target_price_2, target_price_3,
+        stop_price, notes, created_by, opened_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, CURRENT_DATE))
      RETURNING id`,
-    [symbol, direction, entry, target, stop, notes, adminId, openedAt]
+    [symbol, direction, entry, target, target2, target3, stop, notes, adminId, openedAt]
   );
 
   const row = await pool.query(`SELECT ${POSITION_COLUMNS} FROM positions WHERE id = $1`, [inserted.rows[0].id]);
