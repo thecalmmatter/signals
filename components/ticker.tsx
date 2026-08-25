@@ -13,15 +13,21 @@ const inr = (n: number) =>
 const pct = (n: number) =>
   n === 0 ? "0.0%" : `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 
-// Compact "T1 355 · T2 410 · T3 480" — T2/T3 only shown once set, so this
-// stays one line inside the card's fixed-height back face regardless of how
-// many targets a signal actually has (no card resize / marquee change
-// needed for the common case of just T1).
+// T2/T3 only included once set, so this stays one line inside the card's
+// fixed-height back face regardless of how many targets a signal actually
+// has (no card resize / marquee change needed for the common case of just
+// T1).
+function targetEntries(stock: TickerStock): { label: string; value: number }[] {
+  const entries = [{ label: "T1", value: stock.target }];
+  if (stock.target2) entries.push({ label: "T2", value: stock.target2 });
+  if (stock.target3) entries.push({ label: "T3", value: stock.target3 });
+  return entries;
+}
+
 function formatTargets(stock: TickerStock) {
-  const parts = [`T1 ${stock.target.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`];
-  if (stock.target2) parts.push(`T2 ${stock.target2.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`);
-  if (stock.target3) parts.push(`T3 ${stock.target3.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`);
-  return parts.join(" · ");
+  return targetEntries(stock)
+    .map((e) => `${e.label} ${e.value.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`)
+    .join(" · ");
 }
 
 function cn(...parts: (string | false | null | undefined)[]) {
@@ -165,10 +171,18 @@ function TickerCard({
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="shrink-0 text-zinc-500">Targets</span>
                     <span
-                      className={cn("truncate text-right font-semibold tabular-nums", tone.target)}
+                      className="truncate text-right tabular-nums"
                       title={formatTargets(stock)}
                     >
-                      {formatTargets(stock)}
+                      {targetEntries(stock).map((e, i) => (
+                        <span key={e.label}>
+                          {i > 0 && <span className="text-zinc-600"> · </span>}
+                          <span className="text-[10px] font-semibold text-zinc-500">{e.label} </span>
+                          <span className={cn("font-semibold", tone.target)}>
+                            {e.value.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                          </span>
+                        </span>
+                      ))}
                     </span>
                   </span>
                   <span className="flex items-baseline justify-between">
