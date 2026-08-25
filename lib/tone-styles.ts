@@ -1,8 +1,13 @@
-// Shared tone (buy/sell/watch) styling — used by TickerCard and the signal
-// detail modal so both render the same badge/border colors. Split out of
-// ticker.tsx to avoid a circular import between ticker.tsx and the modal.
+// Shared tone (buy/sell/watch + live-derived outcome) styling — used by
+// TickerCard and the signal detail modal so both render the same
+// badge/border colors. Split out of ticker.tsx to avoid a circular import
+// between ticker.tsx and the modal.
+//
+// target_hit / stopped take over the DIR badge once the live price crosses
+// a target or the stop — a signal no longer shows "BUY" forever just
+// because nobody's manually closed it out yet.
 
-export type Tone = "bullish" | "bearish" | "neutral";
+export type Tone = "bullish" | "bearish" | "neutral" | "target_hit" | "stopped";
 
 export const TONES: Record<
   Tone,
@@ -42,5 +47,23 @@ export const TONES: Record<
     text: "text-zinc-300",
     target: "text-zinc-200",
     shadow: "shadow-[0_16px_32px_-18px] shadow-zinc-900",
+  },
+  target_hit: {
+    label: "TARGET HIT",
+    badge: "bg-sky-400/15 text-sky-300 ring-1 ring-inset ring-sky-400/40",
+    card: "border-sky-400/40 bg-zinc-900",
+    hover: "group-hover:border-sky-300/70",
+    text: "text-sky-400",
+    target: "text-sky-400",
+    shadow: "shadow-[0_16px_32px_-18px] shadow-sky-500/40",
+  },
+  stopped: {
+    label: "STOPPED",
+    badge: "bg-amber-400/15 text-amber-300 ring-1 ring-inset ring-amber-400/40",
+    card: "border-amber-400/40 bg-zinc-900",
+    hover: "group-hover:border-amber-300/70",
+    text: "text-amber-400",
+    target: "text-amber-400",
+    shadow: "shadow-[0_16px_32px_-18px] shadow-amber-500/40",
   },
 };

@@ -16,6 +16,41 @@
 import { getPool } from "./db";
 import { getQuotes, type Quote } from "./fyers";
 
+/**
+ * Live, price-derived outcome — never stored, always recomputed from the
+ * current quote against the signal's own targets/stop. This is what powers
+ * the DIR badge flipping from "BUY" to "TARGET HIT"/"STOPPED" automatically
+ * once price crosses one of those levels, instead of a signal sitting there
+ * looking like an open BUY forever until an admin manually suppresses it.
+ */
+export type SignalOutcome = "open" | "target_hit" | "stopped";
+
+/**
+ * Any of T1/T2/T3 hit (favorable direction) → "target_hit".
+ * Stop crossed (unfavorable direction) → "stopped".
+ * Neither, or a "watch" signal with no direction to judge against → "open".
+ * If both a target and the stop are technically crossed (shouldn't happen
+ * for a sane setup, but live prices are messy), stop takes precedence —
+ * "the trade got stopped out" is the more urgent fact to surface.
+ */
+export function computeOutcome(
+  signalType: "buy" | "sell" | "watch",
+  price: number,
+  targets: (number | null)[],
+  stop: number | null
+): SignalOutcome {
+  if (signalType === "watch") return "open";
+  const set = targets.filter((t): t is number => t !== null && t > 0);
+  if (signalType === "buy") {
+    if (stop && stop > 0 && price <= stop) return "stopped";
+    if (set.some((t) => price >= t)) return "target_hit";
+  } else {
+    if (stop && stop > 0 && price >= stop) return "stopped";
+    if (set.some((t) => price <= t)) return "target_hit";
+  }
+  return "open";
+}
+
 export type LiveSignal = {
   symbol: string;
   name: string;
@@ -31,6 +66,8 @@ export type LiveSignal = {
   /** T3 / long-term target — not every signal has one yet. */
   target3: number | null;
   stop: number | null;
+  /** Live-derived — see computeOutcome(). Not stored, always fresh. */
+  outcome: SignalOutcome;
   daysIn: number;
   daysToExit: number;
   /** When this symbol's active signal was first generated (ISO). */
@@ -89,18 +126,24 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     const price = quote ? quote.ltp : Number(r.price) || 0;
     const changePct = quote && quote.prevClose ? ((quote.ltp - quote.prevClose) / quote.prevClose) * 100 : 0;
     const change = quote ? quote.ltp - quote.prevClose : 0;
+    const signalType = r.signal_type as "buy" | "sell" | "watch";
+    const target = numOrNull(r.target_price);
+    const target2 = numOrNull(r.target_price_2);
+    const target3 = numOrNull(r.target_price_3);
+    const stop = numOrNull(r.stop_price);
     return {
       symbol: r.symbol as string,
       name: (r.name ?? r.symbol) as string,
-      signal: r.signal_type as "buy" | "sell" | "watch",
+      signal: signalType,
       price,
       changePct,
       change,
       entry: numOrNull(r.entry_price),
-      target: numOrNull(r.target_price),
-      target2: numOrNull(r.target_price_2),
-      target3: numOrNull(r.target_price_3),
-      stop: numOrNull(r.stop_price),
+      target,
+      target2,
+      target3,
+      stop,
+      outcome: computeOutcome(signalType, price, [target, target2, target3], stop),
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,
       generatedAt: new Date(r.generated_at as string).toISOString(),

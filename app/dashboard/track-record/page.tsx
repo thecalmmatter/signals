@@ -33,6 +33,40 @@ function targetReached(s: LiveSignal, value: number): boolean | null {
   return null;
 }
 
+// Live-derived direction badge — flips from BUY/SELL to TARGET HIT/STOPPED
+// once the live price crosses a level, same rule as the ticker/modal
+// (s.outcome, computed once in loadLiveSignals so this page and the ticker
+// can never disagree on whether a signal has actually played out).
+function DirBadge({ s }: { s: LiveSignal }) {
+  if (s.outcome === "stopped") {
+    return (
+      <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-400 ring-1 ring-inset ring-amber-400/30">
+        stopped
+      </span>
+    );
+  }
+  if (s.outcome === "target_hit") {
+    return (
+      <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-medium text-sky-400 ring-1 ring-inset ring-sky-400/30">
+        target hit
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
+        s.signal === "sell"
+          ? "bg-red-500/15 text-red-400 ring-red-400/30"
+          : s.signal === "watch"
+            ? "bg-zinc-700/40 text-zinc-400 ring-zinc-500/30"
+            : "bg-emerald-500/15 text-emerald-400 ring-emerald-400/30"
+      }`}
+    >
+      {s.signal}
+    </span>
+  );
+}
+
 function TargetCell({ s, value }: { s: LiveSignal; value: number | null }) {
   if (!value) return <span className="text-zinc-600">—</span>;
   const reached = targetReached(s, value);
@@ -150,17 +184,7 @@ export default async function TrackRecordPage() {
                   <tr key={s.symbol} className="bg-zinc-950">
                     <td className="px-3 py-2.5 font-medium text-zinc-100">{s.symbol}</td>
                     <td className="px-3 py-2.5">
-                      <span
-                        className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${
-                          s.signal === "sell"
-                            ? "bg-red-500/15 text-red-400 ring-red-400/30"
-                            : s.signal === "watch"
-                              ? "bg-zinc-700/40 text-zinc-400 ring-zinc-500/30"
-                              : "bg-emerald-500/15 text-emerald-400 ring-emerald-400/30"
-                        }`}
-                      >
-                        {s.signal}
-                      </span>
+                      <DirBadge s={s} />
                     </td>
                     <td className="px-3 py-2.5 text-xs text-zinc-400">
                       {new Date(s.generatedAt).toISOString().slice(0, 10)}
@@ -177,8 +201,17 @@ export default async function TrackRecordPage() {
                     <td className="px-3 py-2.5">
                       <TargetCell s={s} value={s.target3} />
                     </td>
-                    <td className="px-3 py-2.5 tabular-nums text-zinc-300">
-                      {s.stop ? inr(s.stop) : "—"}
+                    <td className="px-3 py-2.5">
+                      {s.stop ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="tabular-nums text-zinc-300">{inr(s.stop)}</span>
+                          {s.outcome === "stopped" && (
+                            <span className="text-amber-400" title="Live price has hit the stop">✕</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-300">{inr(s.price)}</td>
                     <td

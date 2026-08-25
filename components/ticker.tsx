@@ -57,7 +57,7 @@ function TickerCard({
   const ref = useRef<HTMLButtonElement>(null);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
 
-  const tone = TONES[toneOf(stock.signal)];
+  const tone = TONES[toneOf(stock.signal, stock.outcome)];
 
   const handleMove = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (reduced || open) {

@@ -1,5 +1,8 @@
 export type Signal = "buy" | "sell" | "watch";
 
+/** Live-derived — see lib/live-signals.ts computeOutcome(). Not stored. */
+export type Outcome = "open" | "target_hit" | "stopped";
+
 export type TickerStock = {
   symbol: string;
   name: string;
@@ -7,6 +10,9 @@ export type TickerStock = {
   change: number;
   changePct: number;
   signal: Signal;
+  /** Live price vs. targets/stop, recomputed on every fetch. Defaults to
+   *  "open" when absent (e.g. the hardcoded sample/demo data below). */
+  outcome?: Outcome;
   /** Days already into the swing. */
   daysIn: number;
   /** Days remaining until the setup's expected exit. */
@@ -36,8 +42,11 @@ export const STOCKS: TickerStock[] = [
 ];
 
 export function toneOf(
-  signal: Signal
-): "bullish" | "bearish" | "neutral" {
+  signal: Signal,
+  outcome: Outcome = "open"
+): "bullish" | "bearish" | "neutral" | "target_hit" | "stopped" {
+  if (outcome === "stopped") return "stopped";
+  if (outcome === "target_hit") return "target_hit";
   if (signal === "buy") return "bullish";
   if (signal === "sell") return "bearish";
   return "neutral";

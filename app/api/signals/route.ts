@@ -47,6 +47,10 @@ export async function GET() {
       target2: s.target2,
       target3: s.target3,
       stop: s.stop ?? 0,
+      // Live-derived — see lib/live-signals.ts computeOutcome(). Drives the
+      // DIR badge flipping from BUY/SELL to TARGET HIT/STOPPED once price
+      // crosses a level, without needing an admin to manually close it out.
+      outcome: s.outcome,
       // No longer shown on the ticker, but the chat feature still uses
       // this as background context — keep it populated, just not rendered.
       daysIn: s.daysIn,

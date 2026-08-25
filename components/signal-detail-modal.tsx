@@ -254,7 +254,7 @@ export function SignalDetailModal({
   const chartHostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<{ remove: () => void } | null>(null);
 
-  const tone = TONES[toneOf(stock.signal)];
+  const tone = TONES[toneOf(stock.signal, stock.outcome)];
 
   // Esc to close.
   useEffect(() => {
@@ -454,7 +454,14 @@ export function SignalDetailModal({
             </div>
             <div>
               <p className="text-[10px] uppercase tracking-wide text-zinc-500">Stop</p>
-              <p className="font-semibold tabular-nums text-zinc-50">{inr(stock.stop)}</p>
+              <p className="flex items-center gap-1.5">
+                <span className="font-semibold tabular-nums text-zinc-50">{inr(stock.stop)}</span>
+                {stock.outcome === "stopped" && (
+                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-400 ring-1 ring-inset ring-amber-400/30">
+                    hit
+                  </span>
+                )}
+              </p>
             </div>
           </div>
 
