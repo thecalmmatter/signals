@@ -40,6 +40,14 @@ export function computeOutcome(
   stop: number | null
 ): SignalOutcome {
   if (signalType === "watch") return "open";
+  // A price of 0 (or negative) is never real — it means no live quote was
+  // available and the signal also has no stored fallback price (manually
+  // created signals never had a price column set). Treating 0 as a real
+  // price made every BUY read as "stopped" (0 <= any positive stop) and
+  // every SELL read as "target_hit" (0 <= any positive target) whenever
+  // Fyers quotes were briefly unavailable — the whole ticker's DIR badges
+  // would flip incorrectly. Bail to "open" instead of guessing.
+  if (!(price > 0)) return "open";
   const set = targets.filter((t): t is number => t !== null && t > 0);
   if (signalType === "buy") {
     if (stop && stop > 0 && price <= stop) return "stopped";
