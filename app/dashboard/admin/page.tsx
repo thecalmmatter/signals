@@ -1,50 +1,14 @@
 import { redirect } from "next/navigation";
 import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
-import { isBillingEnabled } from "@/lib/access";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { POSITION_COLUMNS, mapPositionRow, loadLivePricesFor } from "@/lib/positions-admin";
 import AdminSignals from "@/components/admin-signals";
 import AdminScanMappings from "@/components/admin-scan-mappings";
-import AdminBilling from "@/components/admin-billing";
 import AdminPositions from "@/components/admin-positions";
-import AdminWaitlist from "@/components/admin-waitlist";
 import { ActivityFeed } from "@/components/activity-feed";
 
 export const dynamic = "force-dynamic";
-
-// Waitlist table (scripts/migration_waitlist.sql) may not be applied yet —
-// degrade to an empty panel instead of a hard 500 if so.
-async function loadWaitlist() {
-  try {
-    const pool = getPool();
-    const [totalRes, bySourceRes, recentRes] = await Promise.all([
-      pool.query("SELECT count(*)::int AS total FROM waitlist_signups"),
-      pool.query(
-        `SELECT coalesce(source, '(none)') AS source, count(*)::int AS total
-           FROM waitlist_signups
-          GROUP BY source
-          ORDER BY total DESC`
-      ),
-      pool.query(
-        "SELECT email, source, created_at, invited_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
-      ),
-    ]);
-    return {
-      total: totalRes.rows[0]?.total ?? 0,
-      bySource: bySourceRes.rows.map((r) => ({ source: r.source as string, total: r.total as number })),
-      recent: recentRes.rows.map((r) => ({
-        email: r.email as string,
-        source: r.source as string | null,
-        createdAt: r.created_at as string,
-        invitedAt: (r.invited_at as string | null) ?? null,
-      })),
-    };
-  } catch (error) {
-    console.error("failed to load waitlist data (run scripts/migration_waitlist.sql?)", error);
-    return { total: 0, bySource: [], recent: [] };
-  }
-}
 
 // Positions ledger (scripts/migration_positions.sql) may not be applied yet —
 // degrade to an empty panel instead of a hard 500 if so.
@@ -58,36 +22,6 @@ async function loadPositions() {
   } catch (error) {
     console.error("failed to load positions data (run scripts/migration_positions.sql?)", error);
     return [];
-  }
-}
-
-
-// Billing tables (scripts/migration_billing.sql) may not be applied on every
-// environment yet — degrade to an empty panel instead of a hard 500 if so.
-async function loadBilling() {
-  try {
-    const pool = getPool();
-    const [usersRes, settingsRes] = await Promise.all([
-      pool.query(
-        `SELECT id, email, subscription_status, trial_ends_at, razorpay_subscription_id, created_at
-           FROM users ORDER BY created_at DESC`
-      ),
-      pool.query("SELECT default_trial_ends_at FROM app_settings WHERE id = 1"),
-    ]);
-    return {
-      users: usersRes.rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        subscriptionStatus: r.subscription_status,
-        trialEndsAt: r.trial_ends_at,
-        razorpaySubscriptionId: r.razorpay_subscription_id,
-        createdAt: r.created_at,
-      })),
-      defaultTrialEndsAt: settingsRes.rows[0]?.default_trial_ends_at ?? null,
-    };
-  } catch (error) {
-    console.error("failed to load billing data (run scripts/migration_billing.sql?)", error);
-    return { users: [], defaultTrialEndsAt: null };
   }
 }
 
@@ -108,8 +42,6 @@ export default async function AdminPage() {
     signalType: r.signal_type,
     active: r.active,
   }));
-  const billing = await loadBilling();
-  const waitlist = await loadWaitlist();
   const positions = await loadPositions();
   const livePrices = await loadLivePricesFor(positions);
 
@@ -127,6 +59,12 @@ export default async function AdminPage() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <a
+              href="/dashboard/admin/users"
+              className="rounded-lg border border-sky-600/50 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-400 transition hover:bg-sky-500/20"
+            >
+              Users →
+            </a>
             <a
               href="/dashboard/admin/broker"
               className="rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition hover:bg-emerald-500/20"
@@ -158,48 +96,6 @@ export default async function AdminPage() {
             future win-rate / statistical-edge report.
           </p>
           <AdminPositions positions={positions} livePrices={livePrices} />
-        </div>
-        <div className="mt-8">
-          <h2 className="mb-4 text-lg font-semibold tracking-tight text-zinc-50">
-            Trial & billing
-          </h2>
-          {!isBillingEnabled() && (
-            <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
-              Billing is disabled sitewide (<code className="text-amber-200">BILLING_ENABLED=false</code>).
-              Every signed-in user has full free access regardless of the trial
-              dates and subscription statuses below — they&apos;re preserved but
-              not enforced. Set <code className="text-amber-200">BILLING_ENABLED=true</code> (or remove
-              the var) and redeploy to re-enable the paywall.
-            </div>
-          )}
-          <AdminBilling initialUsers={billing.users} initialDefaultTrialEndsAt={billing.defaultTrialEndsAt} />
-        </div>
-        <div className="mt-8">
-          <div className="mb-4 flex items-baseline justify-between gap-3">
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-50">Waitlist</h2>
-            <span className="text-sm text-zinc-500">{waitlist.total} signup{waitlist.total === 1 ? "" : "s"}</span>
-          </div>
-          <p className="mb-4 text-sm text-zinc-400">
-            Joining the waitlist is just an interest signal — it does not grant
-            dashboard access on its own. Click <strong className="text-zinc-300">Invite</strong> to
-            send a real Clerk invitation once you&apos;ve set the Clerk app&apos;s
-            Access mode to Invite-only (see README §7).
-          </p>
-
-          {waitlist.bySource.length > 0 && (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {waitlist.bySource.map((s) => (
-                <span
-                  key={s.source}
-                  className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-xs text-zinc-300"
-                >
-                  {s.source} <span className="text-zinc-500">· {s.total}</span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          <AdminWaitlist rows={waitlist.recent} />
         </div>
       </main>
     </div>
