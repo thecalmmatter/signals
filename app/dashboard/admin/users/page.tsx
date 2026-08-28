@@ -21,9 +21,18 @@ async function loadWaitlist() {
           GROUP BY source
           ORDER BY total DESC`
       ),
-      pool.query(
-        "SELECT email, source, created_at, invited_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
-      ),
+      // blocked_at (scripts/migration_waitlist_block.sql) may not be applied
+      // yet on every environment — fall back to the query without it rather
+      // than losing the whole waitlist section over one missing column.
+      pool
+        .query(
+          "SELECT email, source, created_at, invited_at, blocked_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
+        )
+        .catch(() =>
+          pool.query(
+            "SELECT email, source, created_at, invited_at FROM waitlist_signups ORDER BY created_at DESC LIMIT 100"
+          )
+        ),
     ]);
     return {
       total: totalRes.rows[0]?.total ?? 0,
@@ -33,6 +42,7 @@ async function loadWaitlist() {
         source: r.source as string | null,
         createdAt: r.created_at as string,
         invitedAt: (r.invited_at as string | null) ?? null,
+        blockedAt: (r.blocked_at as string | null | undefined) ?? null,
       })),
     };
   } catch (error) {

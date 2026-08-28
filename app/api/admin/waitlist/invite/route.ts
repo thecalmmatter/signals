@@ -25,6 +25,13 @@ export async function POST(req: Request) {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!email) return json({ error: "email is required" }, 400);
 
+  const blockedCheck = await getPool()
+    .query(`SELECT blocked_at FROM waitlist_signups WHERE email = $1`, [email])
+    .catch(() => null); // blocked_at column may not exist yet — fail open, same as before this feature
+  if (blockedCheck?.rows[0]?.blocked_at) {
+    return json({ error: "this email is blocked — unblock it first" }, 400);
+  }
+
   try {
     const client = await clerkClient();
     await client.invitations.createInvitation({
