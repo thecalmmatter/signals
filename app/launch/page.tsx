@@ -3,6 +3,15 @@ import { Ticker } from "@/components/ticker";
 import { LandingParticleCanvas } from "@/components/landing-particle-canvas";
 import { WaitlistForm } from "@/components/waitlist-form";
 import { STOCKS } from "@/lib/stocks";
+import { getResultsChannelUrl } from "@/lib/telegram-results";
+
+// Skeptical, cold Product Hunt traffic is exactly who a public, unfiltered
+// track record is for — a lower-friction proof point than "just trust the
+// signup page." Null (channel not configured) degrades silently: both spots
+// below that reference this just don't render. Deliberately NOT added to
+// /signup itself — that's a conversion page, not a proof-browsing one; an
+// exit link there risks losing someone mid-signup instead of helping them.
+const CHANNEL_URL = getResultsChannelUrl();
 
 export const metadata = {
   title: "Signals on Product Hunt — swing setups for NSE large-caps",
@@ -62,7 +71,9 @@ const FAQ = [
   },
   {
     q: "What's the track record?",
-    a: "Early — genuinely early. Every signal posted publicly is logged the moment it's made and shown at /dashboard/track-record as it plays out, unfiltered. No cherry-picking, no deleting the ones that didn't work.",
+    a: CHANNEL_URL
+      ? "Early — genuinely early. Every signal posted publicly is logged the moment it's made and shown at /dashboard/track-record as it plays out, unfiltered. No cherry-picking, no deleting the ones that didn't work. It's also posted live on our public Telegram channel — no signup needed, see the link below."
+      : "Early — genuinely early. Every signal posted publicly is logged the moment it's made and shown at /dashboard/track-record as it plays out, unfiltered. No cherry-picking, no deleting the ones that didn't work.",
   },
   {
     q: "What's free vs. paid?",
@@ -238,6 +249,23 @@ export default function LaunchPage() {
                 <p className="mb-3 text-xs text-zinc-500">Not ready yet? Just get notified.</p>
                 <WaitlistForm source="producthunt" />
               </div>
+
+              {CHANNEL_URL && (
+                <div className="mx-auto mt-6 max-w-md border-t border-white/[0.08] pt-6">
+                  <p className="text-xs text-zinc-500">
+                    Or skip the signup and watch the track record build in the open —{" "}
+                    <a
+                      href={CHANNEL_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-zinc-300 underline decoration-zinc-600 underline-offset-2 transition-colors hover:text-zinc-50"
+                    >
+                      follow the results on Telegram
+                    </a>
+                    .
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </section>
