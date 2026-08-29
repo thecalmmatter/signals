@@ -117,10 +117,30 @@ const BASE_COLUMNS =
   "stop_price, days_in, days_to_exit, status, generated_at, updated_at";
 
 async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
-  // outcome_locked/outcome_locked_at (scripts/migration_signal_outcome_lock.sql)
-  // may not be applied on every environment yet — fall back to the columns
-  // without them instead of a hard failure that would take the whole ticker
-  // down. Locking just won't happen until the migration runs.
+  // Three tiers, each degrading gracefully rather than taking the whole
+  // ticker down:
+  //  1. Full — outcome_locked/outcome_locked_at (migration_signal_outcome_lock.sql)
+  //     AND outcome_exit_price (migration_telegram_digest.sql) both applied.
+  //  2. Lock only — outcome_locked/outcome_locked_at applied, but the newer
+  //     outcome_exit_price migration hasn't run yet on this environment.
+  //     Sticky lock still works; the exit price just won't be frozen for the
+  //     digest feature until the migration runs.
+  //  3. Neither — sticky lock disabled entirely, outcome computed live only.
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (symbol)
+                ${BASE_COLUMNS}, outcome_locked, outcome_locked_at, outcome_exit_price
+           FROM signals
+          WHERE status = 'active'
+          ORDER BY symbol, updated_at DESC
+       ) t
+       ORDER BY generated_at DESC, symbol`
+    );
+    return { rows, lockSupported: true, exitPriceSupported: true };
+  } catch {
+    // fall through to tier 2
+  }
   try {
     const { rows } = await pool.query(
       `SELECT * FROM (
@@ -132,7 +152,7 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
        ) t
        ORDER BY generated_at DESC, symbol`
     );
-    return { rows, lockSupported: true };
+    return { rows, lockSupported: true, exitPriceSupported: false };
   } catch (error) {
     console.error(
       "loadLiveSignals: outcome_locked columns missing — run scripts/migration_signal_outcome_lock.sql; sticky lock disabled for now",
@@ -148,13 +168,13 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
        ) t
        ORDER BY generated_at DESC, symbol`
     );
-    return { rows, lockSupported: false };
+    return { rows, lockSupported: false, exitPriceSupported: false };
   }
 }
 
 export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
   const pool = getPool();
-  const { rows, lockSupported } = await queryActiveSignals(pool);
+  const { rows, lockSupported, exitPriceSupported } = await queryActiveSignals(pool);
 
   let quotes = new Map<string, Quote>();
   let quotesOk = true;
@@ -234,38 +254,41 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
   });
 
   if (newlyLocked.length > 0) {
-    const stoppedIds = newlyLocked.filter((n) => n.outcome === "stopped").map((n) => n.id);
-    const targetHitIds = newlyLocked.filter((n) => n.outcome === "target_hit").map((n) => n.id);
     // Actually-locked-by-this-call ids only — RETURNING id, not the input
     // list, because two concurrent loadLiveSignals() calls (e.g. two users'
     // tickers polling at once) can both compute the same newlyLocked
     // candidate; the `outcome_locked IS NULL` guard means only one of them
     // actually flips the row. Broadcasting off the input list instead of
     // RETURNING would announce the same close twice.
+    //
+    // Per-row updates (not a bulk WHERE id = ANY(...)) because each signal's
+    // exitPrice differs — outcome_exit_price freezes the price at the exact
+    // moment of crossing, so the Telegram digest's return% doesn't keep
+    // drifting with the live quote after the trade is actually over. Volume
+    // here is always tiny (how many signals cross in the same ~10s poll?),
+    // so per-row round trips are not a real cost.
     const actuallyLocked = new Set<string>();
-    try {
-      if (stoppedIds.length > 0) {
-        const res = await pool.query<{ id: string }>(
-          `UPDATE signals SET outcome_locked = 'stopped', outcome_locked_at = now()
-            WHERE id = ANY($1) AND outcome_locked IS NULL
-            RETURNING id`,
-          [stoppedIds]
-        );
-        res.rows.forEach((r) => actuallyLocked.add(r.id));
+    for (const n of newlyLocked) {
+      try {
+        const res = exitPriceSupported
+          ? await pool.query<{ id: string }>(
+              `UPDATE signals SET outcome_locked = $1, outcome_locked_at = now(), outcome_exit_price = $2
+                WHERE id = $3 AND outcome_locked IS NULL
+                RETURNING id`,
+              [n.outcome, n.exitPrice, n.id]
+            )
+          : await pool.query<{ id: string }>(
+              `UPDATE signals SET outcome_locked = $1, outcome_locked_at = now()
+                WHERE id = $2 AND outcome_locked IS NULL
+                RETURNING id`,
+              [n.outcome, n.id]
+            );
+        if (res.rows[0]) actuallyLocked.add(res.rows[0].id);
+      } catch (error) {
+        // Non-fatal — the response already has the right outcome for this
+        // call; it just won't be locked in for next time until this succeeds.
+        console.error("loadLiveSignals: failed to persist outcome lock", n.id, error);
       }
-      if (targetHitIds.length > 0) {
-        const res = await pool.query<{ id: string }>(
-          `UPDATE signals SET outcome_locked = 'target_hit', outcome_locked_at = now()
-            WHERE id = ANY($1) AND outcome_locked IS NULL
-            RETURNING id`,
-          [targetHitIds]
-        );
-        res.rows.forEach((r) => actuallyLocked.add(r.id));
-      }
-    } catch (error) {
-      // Non-fatal — the response already has the right outcome for this
-      // call; it just won't be locked in for next time until this succeeds.
-      console.error("loadLiveSignals: failed to persist outcome lock", error);
     }
 
     // Broadcast to the public results channel — this is the product's

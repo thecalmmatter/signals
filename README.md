@@ -63,6 +63,7 @@ psql "$DATABASE_URL" -f scripts/migration_multi_target.sql
 psql "$DATABASE_URL" -f scripts/migration_signal_outcome_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist_block.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_leads.sql
+psql "$DATABASE_URL" -f scripts/migration_telegram_digest.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -293,6 +294,39 @@ not built yet, everything beyond that stays app-exclusive by design.
   the `RETURNING id` race-guard in that file) a signal's outcome gets
   locked. Best-effort: a Telegram failure here never affects the ticker
   response users actually see.
+- Posts use `parse_mode: "HTML"` with a 🟢/🔴 dot per outcome — the colored
+  win/loss mix at a glance is the point of posting both unfiltered.
+
+### 11a. Periodic results digest
+
+On top of the instant per-close post above, a scheduled digest rolls up
+everything closed **since the last digest** into one "symbols + overall
+return" post — for people who just want a periodic pulse check rather than
+a notification per close.
+
+- Run `scripts/migration_telegram_digest.sql` — adds `signals.outcome_exit_price`
+  (the price frozen at the moment a signal locked, so a digest's return %
+  doesn't keep drifting with the live quote after the trade is actually
+  over) and a single-row `telegram_digest_state` table (`last_posted_at`).
+- Triggered by the `crons` entry in `vercel.json` hitting
+  `/api/cron/telegram-digest` — **once a day on Vercel's Hobby plan**
+  (Hobby caps cron frequency at daily; Pro allows finer schedules by editing
+  that cron expression). Default fire time is `30 10 * * *` UTC (16:00 IST,
+  just after NSE close) — edit `vercel.json` and redeploy to change it.
+- `DIGEST_INTERVAL_HOURS` (env var, default `24`) controls the *actual*
+  posting cadence on top of that daily trigger — e.g. `48` to post every
+  other day — and takes effect on the next cron tick with **no redeploy**.
+  Can't go more frequent than the underlying cron schedule.
+- Set `CRON_SECRET` (any random value, `openssl rand -hex 24`) — Vercel
+  automatically sends it back as `Authorization: Bearer <value>` on requests
+  it generates for the cron job, which the route checks. Also works as a
+  manual `?token=<value>` query param to trigger a check by hand.
+- If nothing has closed since the last digest, it silently skips (no empty
+  "nothing happened" post) and leaves `last_posted_at` untouched, so the
+  next check still looks back to the same point.
+- `lib/telegram-digest.ts` — `postDigestIfDue()`. Same bot/channel/HTML
+  formatting as the instant post (`sendResultsChannelMessage()`, shared from
+  `lib/telegram-results.ts`), so the channel reads consistently.
 
 ## Useful commands
 

@@ -19,33 +19,23 @@
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
 
+// HTML-escape user/DB-derived text before dropping it into a parse_mode:
+// "HTML" message — symbol names are admin-controlled, not public input, but
+// escaping costs nothing and avoids a malformed message if one ever contains
+// &, <, or >.
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 export function isResultsChannelConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_LEADS_BOT_TOKEN && process.env.TELEGRAM_RESULTS_CHANNEL_ID);
 }
 
-export async function announceOutcome(params: {
-  symbol: string;
-  outcome: "target_hit" | "stopped";
-  signal: "buy" | "sell" | "watch";
-  entry: number | null;
-  exitPrice: number;
-  daysIn: number;
-}): Promise<void> {
+// Shared by both the instant post (this file) and the periodic digest
+// (lib/telegram-digest.ts) so a channel scroll reads consistently — same
+// bot, same chat_id, same parse_mode.
+export async function sendResultsChannelMessage(text: string): Promise<void> {
   const token = process.env.TELEGRAM_LEADS_BOT_TOKEN;
   const channelId = process.env.TELEGRAM_RESULTS_CHANNEL_ID;
   if (!token || !channelId) return;
-
-  const { symbol, outcome, signal, entry, exitPrice, daysIn } = params;
-  const label = outcome === "target_hit" ? "TARGET HIT" : "STOPPED";
-
-  let returnPart = "";
-  if (entry && entry > 0) {
-    const raw = ((exitPrice - entry) / entry) * 100;
-    const pct = signal === "sell" ? -raw : raw;
-    returnPart = ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
-  }
-  const entryPart = entry && entry > 0 ? `Entry ${inr(entry)} → ${inr(exitPrice)}` : `Closed at ${inr(exitPrice)}`;
-  const text = `${symbol} — ${label}\n${entryPart}${returnPart} · ${daysIn} day${daysIn === 1 ? "" : "s"} in`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
@@ -56,6 +46,7 @@ export async function announceOutcome(params: {
       body: JSON.stringify({
         chat_id: channelId,
         text,
+        parse_mode: "HTML",
         disable_web_page_preview: true,
       }),
       signal: controller.signal,
@@ -69,4 +60,32 @@ export async function announceOutcome(params: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function announceOutcome(params: {
+  symbol: string;
+  outcome: "target_hit" | "stopped";
+  signal: "buy" | "sell" | "watch";
+  entry: number | null;
+  exitPrice: number;
+  daysIn: number;
+}): Promise<void> {
+  if (!isResultsChannelConfigured()) return;
+
+  const { symbol, outcome, signal, entry, exitPrice, daysIn } = params;
+  // Green for a win, red for a loss — the whole point of posting both kinds
+  // unfiltered is that the color makes the mix honest at a glance.
+  const dot = outcome === "target_hit" ? "🟢" : "🔴";
+  const label = outcome === "target_hit" ? "TARGET HIT" : "STOPPED";
+
+  let returnPart = "";
+  if (entry && entry > 0) {
+    const raw = ((exitPrice - entry) / entry) * 100;
+    const pct = signal === "sell" ? -raw : raw;
+    returnPart = ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
+  }
+  const entryPart = entry && entry > 0 ? `Entry ${inr(entry)} → ${inr(exitPrice)}` : `Closed at ${inr(exitPrice)}`;
+  const text = `${dot} <b>${esc(symbol)}</b> — ${label}\n${entryPart}${returnPart} · ${daysIn} day${daysIn === 1 ? "" : "s"} in`;
+
+  await sendResultsChannelMessage(text);
 }
