@@ -1,48 +1,63 @@
-// Periodic "symbols + overall return" summary for the public results
-// channel — separate from the instant per-close post in
-// lib/telegram-results.ts. That one fires the moment a single call closes;
-// this one runs on a schedule (see app/api/cron/telegram-digest/route.ts)
-// and rolls up everything that closed since the last digest into one post.
+// Two independent periodic posts to the public results channel, both
+// separate from the instant per-close post in lib/telegram-results.ts:
 //
-// Scope is deliberately "since last digest", not all-time cumulative — each
-// post should read like a fresh update, not a repeat of names already
-// covered. See scripts/migration_telegram_digest.sql for the two schema
-// pieces this depends on: signals.outcome_exit_price (frozen exit price,
-// so returns here don't drift with the live quote) and the single-row
-// telegram_digest_state table (last_posted_at).
+// 1. "Closed summary" (postDigestIfDue) — rolls up everything that closed
+//    since the last post into one win/loss recap. Scope is deliberately
+//    "since last digest", not all-time cumulative, so each post reads like
+//    a fresh update.
+// 2. "Snapshot" (postSnapshotIfDue) — a compact symbol/return/days table of
+//    every currently-active signal (open, stopped, and target-hit alike),
+//    same shape as the /dashboard/track-record page. Posts unconditionally
+//    on its own schedule, not gated on anything having changed.
+//
+// Both are called from app/api/cron/telegram-digest/route.ts on the same
+// cron trigger, but track their own last-posted timestamp independently —
+// see scripts/migration_telegram_snapshot_digest.sql (telegram_digest_state
+// is keyed by `kind`) and scripts/migration_telegram_digest.sql
+// (signals.outcome_exit_price, needed by the closed summary only).
 
 import type { Pool } from "pg";
 import { isResultsChannelConfigured, sendResultsChannelMessage } from "./telegram-results";
+import { loadLiveSignals, type LiveSignal } from "./live-signals";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+type DigestKind = "closed_summary" | "snapshot";
+
 /**
- * How often the digest should actually post, in hours. Read fresh on every
- * call (no caching) so changing it in Vercel env vars takes effect on the
- * next cron tick — no redeploy needed. The cron trigger itself (vercel.json)
- * still only fires once a day on Vercel's Hobby plan, so this can extend the
- * interval (e.g. 48 to post every other day) but can't go more frequent than
- * daily unless the underlying cron schedule is also changed (Pro plan).
+ * How often a given post kind should actually fire, in hours. Read fresh on
+ * every call (no caching) so changing it in Vercel env vars takes effect on
+ * the next cron tick — no redeploy needed. The cron trigger itself
+ * (vercel.json) still only fires once a day on Vercel's Hobby plan, so this
+ * can extend the interval (e.g. 48 to post every other day) but can't go
+ * more frequent than daily unless the underlying cron schedule also changes
+ * (Pro plan).
  */
-function getIntervalHours(): number {
-  const raw = Number(process.env.DIGEST_INTERVAL_HOURS);
+function getIntervalHours(kind: DigestKind): number {
+  const envVar = kind === "closed_summary" ? "DIGEST_INTERVAL_HOURS" : "SNAPSHOT_INTERVAL_HOURS";
+  const raw = Number(process.env[envVar]);
   return Number.isFinite(raw) && raw > 0 ? raw : 24;
 }
 
-async function getLastPostedAt(pool: Pool): Promise<Date | null> {
+async function getLastPostedAt(pool: Pool, kind: DigestKind): Promise<Date | null> {
   const { rows } = await pool.query<{ last_posted_at: Date | null }>(
-    `SELECT last_posted_at FROM telegram_digest_state WHERE id = true`
+    `SELECT last_posted_at FROM telegram_digest_state WHERE kind = $1`,
+    [kind]
   );
   return rows[0]?.last_posted_at ?? null;
 }
 
-async function setLastPostedAt(pool: Pool, at: Date): Promise<void> {
+async function setLastPostedAt(pool: Pool, kind: DigestKind, at: Date): Promise<void> {
   await pool.query(
-    `INSERT INTO telegram_digest_state (id, last_posted_at) VALUES (true, $1)
-     ON CONFLICT (id) DO UPDATE SET last_posted_at = EXCLUDED.last_posted_at`,
-    [at]
+    `INSERT INTO telegram_digest_state (kind, last_posted_at) VALUES ($1, $2)
+     ON CONFLICT (kind) DO UPDATE SET last_posted_at = EXCLUDED.last_posted_at`,
+    [kind, at]
   );
 }
+
+// ---------------------------------------------------------------------------
+// 1. Closed summary — everything that closed since the last post.
+// ---------------------------------------------------------------------------
 
 type ClosedRow = {
   symbol: string;
@@ -68,15 +83,15 @@ async function queryClosedSince(pool: Pool, since: Date | null): Promise<ClosedR
   return rows;
 }
 
-function returnPct(row: ClosedRow): number | null {
+function closedReturnPct(row: ClosedRow): number | null {
   if (!row.entry_price || row.entry_price <= 0 || row.outcome_exit_price === null) return null;
   const raw = ((row.outcome_exit_price - row.entry_price) / row.entry_price) * 100;
   return row.signal_type === "sell" ? -raw : raw;
 }
 
-function formatDigest(rows: ClosedRow[]): string {
+function formatClosedSummary(rows: ClosedRow[]): string {
   const lines = rows.map((r) => {
-    const pct = returnPct(r);
+    const pct = closedReturnPct(r);
     const dot = r.outcome_locked === "target_hit" ? "🟢" : "🔴";
     const pctText = pct === null ? "" : ` ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
     return `${dot} <b>${esc(r.symbol)}</b>${pctText}`;
@@ -84,7 +99,7 @@ function formatDigest(rows: ClosedRow[]): string {
 
   const wins = rows.filter((r) => r.outcome_locked === "target_hit").length;
   const losses = rows.length - wins;
-  const pcts = rows.map(returnPct).filter((p): p is number => p !== null);
+  const pcts = rows.map(closedReturnPct).filter((p): p is number => p !== null);
   const avg = pcts.length > 0 ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null;
   const avgText = avg === null ? "" : ` · avg ${avg >= 0 ? "+" : ""}${avg.toFixed(1)}%`;
 
@@ -94,25 +109,81 @@ function formatDigest(rows: ClosedRow[]): string {
 }
 
 /**
- * Called by the cron route. Posts only if (a) the channel is configured,
- * (b) enough time has elapsed since the last post, and (c) there's actually
- * something closed to report — a quiet stretch just leaves last_posted_at
- * untouched so the next check still looks back to the same point instead of
- * silently skipping a close that happened during the gap.
+ * Posts only if (a) the channel is configured, (b) enough time has elapsed
+ * since the last post, and (c) there's actually something closed to report
+ * — a quiet stretch just leaves last_posted_at untouched so the next check
+ * still looks back to the same point instead of silently skipping a close
+ * that happened during the gap.
  */
 export async function postDigestIfDue(pool: Pool): Promise<{ posted: boolean; count: number }> {
   if (!isResultsChannelConfigured()) return { posted: false, count: 0 };
 
-  const lastPostedAt = await getLastPostedAt(pool);
+  const lastPostedAt = await getLastPostedAt(pool, "closed_summary");
   if (lastPostedAt) {
     const elapsedHours = (Date.now() - lastPostedAt.getTime()) / (1000 * 60 * 60);
-    if (elapsedHours < getIntervalHours()) return { posted: false, count: 0 };
+    if (elapsedHours < getIntervalHours("closed_summary")) return { posted: false, count: 0 };
   }
 
   const rows = await queryClosedSince(pool, lastPostedAt);
   if (rows.length === 0) return { posted: false, count: 0 };
 
-  await sendResultsChannelMessage(formatDigest(rows));
-  await setLastPostedAt(pool, new Date());
+  await sendResultsChannelMessage(formatClosedSummary(rows));
+  await setLastPostedAt(pool, "closed_summary", new Date());
   return { posted: true, count: rows.length };
+}
+
+// ---------------------------------------------------------------------------
+// 2. Snapshot — symbol / return / days for every currently-active signal.
+// ---------------------------------------------------------------------------
+
+function snapshotReturnPct(s: LiveSignal): number | null {
+  if (!s.entry || s.entry <= 0 || s.signal === "watch") return null;
+  const raw = ((s.price - s.entry) / s.entry) * 100;
+  return s.signal === "sell" ? -raw : raw;
+}
+
+// Telegram's monospace <pre> block is the only way to fake table columns —
+// there's no real HTML <table>. Column widths are computed per-post from
+// the actual symbol lengths so this doesn't hardcode to today's longest
+// name. The 🟢/🔴 prefix is a fixed 2-character width on every data row
+// (never present on the header), so the SYMBOL column still lines up even
+// though emoji glyphs render slightly differently across Telegram clients.
+function formatSnapshot(signals: LiveSignal[]): string {
+  const symbolWidth = Math.max(6, ...signals.map((s) => s.symbol.length));
+  const header = `  ${"SYMBOL".padEnd(symbolWidth)} ${"RETURN".padStart(7)}  DAYS`;
+  const lines = signals.map((s) => {
+    const pct = snapshotReturnPct(s);
+    const dot = pct === null ? "⚪" : pct >= 0 ? "🟢" : "🔴";
+    const pctText = pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+    return `${dot} ${s.symbol.padEnd(symbolWidth)} ${pctText.padStart(7)}  ${String(s.daysIn).padStart(3)}`;
+  });
+  return ["📋 <b>Live signals snapshot</b>", "", `<pre>${esc([header, ...lines].join("\n"))}</pre>`].join("\n");
+}
+
+/**
+ * Unlike the closed summary, this one has no "nothing to report" case —
+ * open positions always exist to show — so it posts unconditionally once
+ * the interval has elapsed, as long as there's at least one active signal.
+ * Reuses loadLiveSignals(), the same source the ticker and track-record
+ * page read from, so the numbers here can never disagree with the app.
+ * Side effect: this also runs the same outcome-lock check loadLiveSignals()
+ * always does, so a cron-triggered snapshot can itself be the thing that
+ * catches a newly-crossed target/stop if nobody happened to have the
+ * dashboard open at that moment.
+ */
+export async function postSnapshotIfDue(pool: Pool): Promise<{ posted: boolean; count: number }> {
+  if (!isResultsChannelConfigured()) return { posted: false, count: 0 };
+
+  const lastPostedAt = await getLastPostedAt(pool, "snapshot");
+  if (lastPostedAt) {
+    const elapsedHours = (Date.now() - lastPostedAt.getTime()) / (1000 * 60 * 60);
+    if (elapsedHours < getIntervalHours("snapshot")) return { posted: false, count: 0 };
+  }
+
+  const { signals } = await loadLiveSignals();
+  if (signals.length === 0) return { posted: false, count: 0 };
+
+  await sendResultsChannelMessage(formatSnapshot(signals));
+  await setLastPostedAt(pool, "snapshot", new Date());
+  return { posted: true, count: signals.length };
 }

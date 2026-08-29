@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
-import { postDigestIfDue } from "@/lib/telegram-digest";
+import { postDigestIfDue, postSnapshotIfDue } from "@/lib/telegram-digest";
 
 export const dynamic = "force-dynamic";
 
-// Triggered by the Vercel Cron entry in vercel.json (once/day on Hobby —
-// see scripts/migration_telegram_digest.sql and lib/telegram-digest.ts for
-// how DIGEST_INTERVAL_HOURS still lets the *actual* posting cadence be
-// longer than that without a redeploy).
+// Triggered by the Vercel Cron entry in vercel.json (once/day on Hobby).
+// Checks two independent periodic posts (see lib/telegram-digest.ts):
+// closed-since-last-post summary (DIGEST_INTERVAL_HOURS) and the
+// symbol/return/days snapshot table (SNAPSHOT_INTERVAL_HOURS) — either can
+// have a longer effective cadence than the daily trigger, set via env var,
+// no redeploy needed.
 //
 // Auth: Vercel automatically sends "Authorization: Bearer <CRON_SECRET>" on
 // requests it generates for a cron job, as long as CRON_SECRET is set as a
@@ -24,11 +26,25 @@ export async function GET(req: Request) {
     if (!ok) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  const pool = getPool();
+
+  // Two independent posts, each gated on its own schedule/state (see
+  // lib/telegram-digest.ts) — one failing never blocks the other.
+  let closedSummary: { posted: boolean; count: number } | { error: string };
   try {
-    const result = await postDigestIfDue(getPool());
-    return NextResponse.json(result);
+    closedSummary = await postDigestIfDue(pool);
   } catch (error) {
-    console.error("GET /api/cron/telegram-digest failed", error);
-    return NextResponse.json({ error: "digest check failed" }, { status: 500 });
+    console.error("GET /api/cron/telegram-digest: closed summary failed", error);
+    closedSummary = { error: "closed summary check failed" };
   }
+
+  let snapshot: { posted: boolean; count: number } | { error: string };
+  try {
+    snapshot = await postSnapshotIfDue(pool);
+  } catch (error) {
+    console.error("GET /api/cron/telegram-digest: snapshot failed", error);
+    snapshot = { error: "snapshot check failed" };
+  }
+
+  return NextResponse.json({ closedSummary, snapshot });
 }

@@ -64,6 +64,7 @@ psql "$DATABASE_URL" -f scripts/migration_signal_outcome_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist_block.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_leads.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_digest.sql
+psql "$DATABASE_URL" -f scripts/migration_telegram_snapshot_digest.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -327,6 +328,33 @@ a notification per close.
 - `lib/telegram-digest.ts` — `postDigestIfDue()`. Same bot/channel/HTML
   formatting as the instant post (`sendResultsChannelMessage()`, shared from
   `lib/telegram-results.ts`), so the channel reads consistently.
+
+### 11b. Live signals snapshot table
+
+A second, independent periodic post — a compact `symbol / return / days`
+table of **every currently-active signal** (open, stopped, and target-hit
+alike), not just what closed recently. Same numbers as
+`/dashboard/track-record`, condensed to three columns.
+
+- Run `scripts/migration_telegram_snapshot_digest.sql` — repoints
+  `telegram_digest_state` from a single fixed row to one row per post
+  `kind` (`closed_summary`, `snapshot`), so this and §11a's digest track
+  their own schedules independently.
+- `SNAPSHOT_INTERVAL_HOURS` (env var, default `24`) — same no-redeploy
+  behavior as `DIGEST_INTERVAL_HOURS`.
+- Posts unconditionally once the interval elapses (no "nothing to report"
+  skip — open positions always exist to show), using a monospace `<pre>`
+  block since Telegram has no real table, with a 🟢/🔴/⚪ dot per row for
+  gain/loss/no-entry-price. Column widths are computed per-post from the
+  actual symbol lengths.
+- `lib/telegram-digest.ts` — `postSnapshotIfDue()`. Reuses
+  `loadLiveSignals()`, the same source the ticker and track-record page
+  read from — the numbers here can never disagree with the app. Side
+  effect: since `loadLiveSignals()` always runs its outcome-lock check,
+  this cron hit can itself catch a newly-crossed target/stop even if nobody
+  had the dashboard open at that moment.
+- Both §11a and §11b are checked on the same daily cron trigger in
+  `vercel.json` — see `app/api/cron/telegram-digest/route.ts`.
 
 ## Useful commands
 
