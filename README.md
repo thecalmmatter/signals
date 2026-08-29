@@ -62,6 +62,7 @@ psql "$DATABASE_URL" -f scripts/migration_positions_signal_link.sql
 psql "$DATABASE_URL" -f scripts/migration_multi_target.sql
 psql "$DATABASE_URL" -f scripts/migration_signal_outcome_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_waitlist_block.sql
+psql "$DATABASE_URL" -f scripts/migration_telegram_leads.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -227,6 +228,41 @@ and only `ADMIN_USER_IDS` can reach the page or its API routes.
   `FYERS_ACCESS_TOKEN` expires daily (refresh via
   `scripts/fyers-get-token.mjs`, see §2), a stale token surfaces here as an
   inline "couldn't reach Fyers" banner rather than a hard failure.
+
+## 10. Telegram Ads lead capture
+
+A second, dedicated Telegram bot (`TELEGRAM_LEADS_BOT_TOKEN` — separate from
+the alert bot in §2) that receives updates and logs a lead every time
+someone taps the deep link on a Telegram Ads campaign and hits Start.
+
+- **Setup:** message @BotFather → `/newbot`. Set an avatar (`/setuserpic`)
+  and description (`/setdescription`, `/setabouttext`) — Telegram Ads
+  rejects a destination bot with no avatar/bio, or one that hasn't been
+  active in the last 2 weeks. Send it a `/start` yourself once.
+- Run `scripts/migration_telegram_leads.sql`, set `TELEGRAM_LEADS_BOT_TOKEN`
+  / `TELEGRAM_LEADS_WEBHOOK_SECRET` / `SITE_URL` (see `.env.example`), then
+  register the webhook once (command is also in `.env.example`):
+  ```bash
+  curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<domain>/api/webhooks/telegram-leads&secret_token=<SECRET>"
+  ```
+- **Ad deep link:** `https://t.me/<YourBotUsername>?start=<tag>` — `<tag>`
+  (e.g. `ph_ad`) is whatever you want to identify this placement by; it's
+  stored as `start_param` on the lead so you can tell which ad drove it.
+- `lib/telegram-leads.ts` — send helper (`sendLeadsBotMessage`) + admin read
+  helper (`loadTelegramLeads`).
+- `POST /api/webhooks/telegram-leads` — public, authenticated by the
+  `X-Telegram-Bot-Api-Secret-Token` header Telegram echoes back (not by
+  session/admin auth). Logs `/start` (with its payload) to `telegram_leads`,
+  upserting on `telegram_user_id` so a re-start updates username/name but
+  keeps the original attribution. Replies with a short welcome + signup link
+  built from `SITE_URL`.
+- Leads show up read-only on `/dashboard/admin/users` under "Telegram ad
+  leads" — username (links to `t.me/<username>`), name, start param, joined
+  date.
+- Telegram Ads itself: self-serve platform at ads.telegram.org requires a
+  minimum €2,000 account top-up; smaller budgets are only available through
+  a certified Telegram ad agency partner. Ad destination URLs must be
+  Telegram links (a bot or channel) — no external URLs allowed.
 
 ## Useful commands
 

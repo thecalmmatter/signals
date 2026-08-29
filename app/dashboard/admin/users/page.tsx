@@ -3,6 +3,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { getPool } from "@/lib/db";
 import { getAdminUserId, isAdminUserId } from "@/lib/admin";
 import { isBillingEnabled } from "@/lib/access";
+import { loadTelegramLeads } from "@/lib/telegram-leads";
 import AdminBilling from "@/components/admin-billing";
 import AdminWaitlist from "@/components/admin-waitlist";
 
@@ -144,6 +145,7 @@ export default async function AdminUsersPage() {
 
   const billing = await loadBilling();
   const waitlist = await loadWaitlist();
+  const telegramLeads = await loadTelegramLeads();
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-950 text-zinc-100">
@@ -222,6 +224,70 @@ export default async function AdminUsersPage() {
           )}
 
           <AdminWaitlist rows={waitlist.recent} />
+        </div>
+
+        <div className="mt-8">
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-semibold tracking-tight text-zinc-50">Telegram ad leads</h2>
+            <span className="text-sm text-zinc-500">
+              {telegramLeads.length} lead{telegramLeads.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="mb-4 text-sm text-zinc-400">
+            Everyone who has tapped Start on @SignalsLeadsBot — the dedicated bot
+            behind the Telegram Ads deep link, separate from the internal alert
+            bot. <span className="text-zinc-300">Start param</span> shows which
+            ad/placement drove the tap. Read-only for now; reach out to them
+            directly on Telegram to follow up.
+          </p>
+          <section className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+              <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2.5">Username</th>
+                  <th className="px-3 py-2.5">Name</th>
+                  <th className="px-3 py-2.5">Start param</th>
+                  <th className="px-3 py-2.5">Joined</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60">
+                {telegramLeads.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-8 text-center text-zinc-500">
+                      No leads yet — nobody has hit Start on the bot.
+                    </td>
+                  </tr>
+                )}
+                {telegramLeads.map((lead) => (
+                  <tr key={lead.telegramUserId} className="bg-zinc-950">
+                    <td className="px-3 py-2.5 text-zinc-200">
+                      {lead.username ? (
+                        <a
+                          href={`https://t.me/${lead.username}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:underline"
+                        >
+                          @{lead.username}
+                        </a>
+                      ) : (
+                        <span className="text-zinc-500">no username</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-zinc-300">{lead.firstName ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-zinc-400">{lead.startParam ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-zinc-400">
+                      {new Date(lead.createdAt).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
         </div>
       </main>
     </div>
