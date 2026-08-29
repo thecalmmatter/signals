@@ -264,6 +264,36 @@ someone taps the deep link on a Telegram Ads campaign and hits Start.
   a certified Telegram ad agency partner. Ad destination URLs must be
   Telegram links (a bot or channel) — no external URLs allowed.
 
+## 11. Public results channel (Telegram)
+
+A public Telegram channel that auto-posts a signal's outcome (symbol,
+entry → exit, return %, days in) the instant it's stopped out or hits a
+target — sourced from the same sticky `outcome_locked` state as the app's
+own DIR badges (§ multi-target / live-signals), so the channel and the app
+can never disagree on what actually happened.
+
+Deliberately **results-only**, not a live mirror of the actionable feed —
+see the positioning discussion this was built from: giving away the live,
+actionable signal for free undercuts the paid tier being built toward,
+whereas posting closed outcomes (wins and losses both, nothing curated) is
+pure proof of the "we don't hide losses" claim already on the landing page,
+with zero cannibalization risk. If daily reach grows, a second, deliberately
+capped surface (e.g. one free live signal a day) is the natural next step —
+not built yet, everything beyond that stays app-exclusive by design.
+
+- **Setup:** add @SignalsLeadsBot (or whichever bot `TELEGRAM_LEADS_BOT_TOKEN`
+  belongs to — same bot as §10, reused rather than standing up a third bot)
+  as an admin of your channel, with permission to post messages.
+- Set `TELEGRAM_RESULTS_CHANNEL_ID` — `@yourchannelusername` for a public
+  channel, or the numeric `-100...` chat id for a private one (find it via
+  `getUpdates` after posting once in the channel with the bot already
+  admin). Leave blank to disable; nothing else breaks.
+- `lib/telegram-results.ts` — `announceOutcome()`, called from
+  `lib/live-signals.ts` the exact moment (and only the exact moment — see
+  the `RETURNING id` race-guard in that file) a signal's outcome gets
+  locked. Best-effort: a Telegram failure here never affects the ticker
+  response users actually see.
+
 ## Useful commands
 
 ```bash

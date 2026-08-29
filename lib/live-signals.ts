@@ -15,6 +15,7 @@
 
 import { getPool } from "./db";
 import { getQuotes, type Quote } from "./fyers";
+import { announceOutcome } from "./telegram-results";
 
 /**
  * Live, price-derived outcome. This is what powers the DIR badge flipping
@@ -167,8 +168,18 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
   const numOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
   // Signals that just crossed a target or the stop for the first time this
-  // call — persisted below so the outcome never reverts on its own once set.
-  const newlyLocked: { id: string; outcome: "target_hit" | "stopped" }[] = [];
+  // call — persisted below so the outcome never reverts on its own once set,
+  // and (once actually persisted — see RETURNING id below) broadcast to the
+  // public results channel via announceOutcome().
+  const newlyLocked: {
+    id: string;
+    outcome: "target_hit" | "stopped";
+    symbol: string;
+    signal: "buy" | "sell" | "watch";
+    entry: number | null;
+    exitPrice: number;
+    daysIn: number;
+  }[] = [];
 
   const signals: LiveSignal[] = rows.map((r) => {
     const quote = quotes.get(r.symbol as string);
@@ -191,7 +202,15 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       const live = computeOutcome(signalType, price, [target, target2, target3], stop);
       outcome = live;
       if (lockSupported && (live === "stopped" || live === "target_hit")) {
-        newlyLocked.push({ id: r.id as string, outcome: live });
+        newlyLocked.push({
+          id: r.id as string,
+          outcome: live,
+          symbol: r.symbol as string,
+          signal: signalType,
+          entry: numOrNull(r.entry_price),
+          exitPrice: price,
+          daysIn: Number(r.days_in) || 0,
+        });
       }
     }
 
@@ -217,25 +236,53 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
   if (newlyLocked.length > 0) {
     const stoppedIds = newlyLocked.filter((n) => n.outcome === "stopped").map((n) => n.id);
     const targetHitIds = newlyLocked.filter((n) => n.outcome === "target_hit").map((n) => n.id);
+    // Actually-locked-by-this-call ids only — RETURNING id, not the input
+    // list, because two concurrent loadLiveSignals() calls (e.g. two users'
+    // tickers polling at once) can both compute the same newlyLocked
+    // candidate; the `outcome_locked IS NULL` guard means only one of them
+    // actually flips the row. Broadcasting off the input list instead of
+    // RETURNING would announce the same close twice.
+    const actuallyLocked = new Set<string>();
     try {
       if (stoppedIds.length > 0) {
-        await pool.query(
+        const res = await pool.query<{ id: string }>(
           `UPDATE signals SET outcome_locked = 'stopped', outcome_locked_at = now()
-            WHERE id = ANY($1) AND outcome_locked IS NULL`,
+            WHERE id = ANY($1) AND outcome_locked IS NULL
+            RETURNING id`,
           [stoppedIds]
         );
+        res.rows.forEach((r) => actuallyLocked.add(r.id));
       }
       if (targetHitIds.length > 0) {
-        await pool.query(
+        const res = await pool.query<{ id: string }>(
           `UPDATE signals SET outcome_locked = 'target_hit', outcome_locked_at = now()
-            WHERE id = ANY($1) AND outcome_locked IS NULL`,
+            WHERE id = ANY($1) AND outcome_locked IS NULL
+            RETURNING id`,
           [targetHitIds]
         );
+        res.rows.forEach((r) => actuallyLocked.add(r.id));
       }
     } catch (error) {
       // Non-fatal — the response already has the right outcome for this
       // call; it just won't be locked in for next time until this succeeds.
       console.error("loadLiveSignals: failed to persist outcome lock", error);
+    }
+
+    // Broadcast to the public results channel — this is the product's
+    // honesty positioning made literal (every closed call posted, wins and
+    // losses both), so it only fires for the exact instant a call actually
+    // closes, never re-fires, and never blocks/breaks the ticker response
+    // if Telegram is slow or down (announceOutcome is itself best-effort).
+    for (const n of newlyLocked) {
+      if (!actuallyLocked.has(n.id)) continue;
+      await announceOutcome({
+        symbol: n.symbol,
+        outcome: n.outcome,
+        signal: n.signal,
+        entry: n.entry,
+        exitPrice: n.exitPrice,
+        daysIn: n.daysIn,
+      });
     }
   }
 
