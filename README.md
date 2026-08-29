@@ -257,7 +257,12 @@ someone taps the deep link on a Telegram Ads campaign and hits Start.
   session/admin auth). Logs `/start` (with its payload) to `telegram_leads`,
   upserting on `telegram_user_id` so a re-start updates username/name but
   keeps the original attribution. Replies with a short welcome + signup link
-  built from `SITE_URL`.
+  built from `SITE_URL`, plus (if §11's results channel is configured) a
+  second, lighter-weight link straight to the channel — someone arriving
+  via a Telegram Ad is already mid-Telegram, not mid-browser, so "see the
+  public track record" is a lower-friction first ask than "go sign up on a
+  website." Without this line there was no path from the bot to the channel
+  at all.
 - Leads show up read-only on `/dashboard/admin/users` under "Telegram ad
   leads" — username (links to `t.me/<username>`), name, start param, joined
   date.
@@ -297,6 +302,14 @@ not built yet, everything beyond that stays app-exclusive by design.
   response users actually see.
 - Posts use `parse_mode: "HTML"` with a 🟢/🔴 dot per outcome — the colored
   win/loss mix at a glance is the point of posting both unfiltered.
+- **Getting people to actually see the channel:** Telegram has no
+  "auto-subscribe" — a bot can't add a user to a channel, only give them a
+  join link to tap themselves. `getResultsChannelUrl()` in
+  `lib/telegram-results.ts` derives that link (`t.me/<handle>` for a public
+  channel, or `TELEGRAM_RESULTS_CHANNEL_URL` if you set one for a private
+  channel) and is currently used in one place: the §10 leads bot's welcome
+  message. Anywhere else a human should see this link (site footer,
+  dashboard) is not wired up yet.
 
 ### 11a. Periodic results digest
 

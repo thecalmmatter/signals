@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { sendLeadsBotMessage } from "@/lib/telegram-leads";
+import { getResultsChannelUrl } from "@/lib/telegram-results";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +23,22 @@ function welcomeText(): string {
   const signupLine = siteUrl
     ? `Sign up here: ${siteUrl}/signup`
     : "Sign up on the Signals dashboard (ask the admin for the link — SITE_URL isn't configured yet).";
+
+  // Someone who tapped a Telegram Ad is mid-Telegram-flow, not mid-browser —
+  // the channel is a lighter-weight ask than "go sign up on a website", and
+  // it's proof (a public, unfiltered track record) before they've committed
+  // to anything. Without this line there was no path from the bot to the
+  // channel at all; a lead only ever saw the signup link. See README §11.
+  const channelUrl = getResultsChannelUrl();
+  const channelLine = channelUrl
+    ? `\n\nWant proof first? Every call's outcome — wins and losses both — gets posted live here: ${channelUrl}`
+    : "";
+
   return (
     "Thanks for stopping by 👋\n\n" +
     "Signals publishes swing setups on NSE large-caps — entry, target, stop, one clean card. " +
     "Free during the public dry run, no card needed.\n\n" +
-    `${signupLine}\n\n` +
+    `${signupLine}${channelLine}\n\n` +
     "(Not financial advice — a technical setup format, trade your own risk.)"
   );
 }

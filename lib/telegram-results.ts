@@ -29,6 +29,27 @@ export function isResultsChannelConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_LEADS_BOT_TOKEN && process.env.TELEGRAM_RESULTS_CHANNEL_ID);
 }
 
+/**
+ * The human-clickable join link, for use anywhere outside this file that
+ * wants to point someone at the channel (currently: the leads bot's welcome
+ * message — see app/api/webhooks/telegram-leads/route.ts). Not the same
+ * thing as TELEGRAM_RESULTS_CHANNEL_ID, which is the Bot API's chat_id
+ * format for sendMessage, not a URL a person can tap:
+ *  - Public channel ("@handle"): the join link is simply t.me/<handle> —
+ *    derived automatically, no extra config needed.
+ *  - Private channel (numeric "-100..." id): there's no way to derive a
+ *    join link from that id. Set TELEGRAM_RESULTS_CHANNEL_URL explicitly
+ *    (Telegram Desktop/app -> channel -> Invite Links) if you want one
+ *    used anywhere.
+ */
+export function getResultsChannelUrl(): string | null {
+  const explicit = process.env.TELEGRAM_RESULTS_CHANNEL_URL;
+  if (explicit) return explicit;
+  const id = process.env.TELEGRAM_RESULTS_CHANNEL_ID;
+  if (id?.startsWith("@")) return `https://t.me/${id.slice(1)}`;
+  return null;
+}
+
 // Shared by both the instant post (this file) and the periodic digest
 // (lib/telegram-digest.ts) so a channel scroll reads consistently — same
 // bot, same chat_id, same parse_mode.
