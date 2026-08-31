@@ -369,6 +369,48 @@ alike), not just what closed recently. Same numbers as
 - Both §11a and §11b are checked on the same daily cron trigger in
   `vercel.json` — see `app/api/cron/telegram-digest/route.ts`.
 
+## 12. Per-stock analytics pane
+
+`/dashboard/stocks/[symbol]` — a dedicated page per symbol (not the
+tap-to-open chart/RSI modal, which stays a quick glance) combining this
+app's own live signal state with third-party research: analyst consensus,
+shareholding, corporate actions, and recent news. Linked from the "Full
+analysis" row inside `signal-detail-modal.tsx`.
+
+- **Data sources, deliberately split two ways**: trade levels/outcome come
+  from `loadLiveSignals()` (§ live-signals — same source as the ticker, so
+  this page can never disagree with it). Everything else — analyst
+  buy/hold/sell, shareholding %, corporate actions, recent news — comes from
+  a separate REST API, **not** from any MCP connector: MCP tools (Tijori
+  Finance was explored first) are only callable by an AI agent in a chat
+  session, not by this app's own backend at runtime. `analyst.indianapi.in`
+  is a real API this app can call directly with its own key.
+- Set `INDIAN_STOCK_API_KEY` (get one at indianapi.in) — see `.env.example`
+  for the exact curl to test it. Leave blank to disable; the page still
+  works, those tiles just show "not configured."
+- `lib/indian-stock-api.ts` — `getStockDetails(symbol)`, a single
+  `GET /stock?symbol=X` call that returns financials, analyst view,
+  shareholding, corporate actions, and news together. Cached 30 minutes
+  (this is a per-page-view lookup a human triggers by clicking through, not
+  a polled endpoint like the ticker). **Field-shape caveat**: the API's own
+  docs only show `analystView`/`recosBar`/`riskMeter`/`shareholding` as
+  `"..."` placeholders — the exact keys haven't been confirmed against a
+  real response yet. `components/stock-analytics-pane.tsx` reads them
+  defensively (tries a few likely field names, falls back to "—"). Once a
+  real key is set and the page has actually been hit, inspect the real
+  payload and tighten both files' field lookups.
+- **Conviction score** (0-100, shown big on the page): a first-pass
+  heuristic — 40% the live signal's technical state, 35% analyst
+  buy/hold/sell mix, 25% promoter shareholding level. Openly approximate,
+  not investment advice; refine the weights/inputs once real field shapes
+  are confirmed and there's a view on what actually predicts outcomes.
+- Visual language reuses `LandingParticleCanvas` and the `glass-panel` CSS
+  utility from the landing page (§ Landing page) rather than inventing a
+  new one — floating, translucent-but-legible tiles over an ambient
+  particle field. Prototype this was built from:
+  `prototypes/analytics-pane-prototype.html` (static demo, not wired to
+  real data).
+
 ## Useful commands
 
 ```bash

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Signals — trade analytics pane prototype</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #09090b;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #fafafa;
+    overflow: hidden;
+  }
+  #vignette {
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(16,185,129,0.10), transparent 55%),
+      radial-gradient(ellipse at 75% 75%, rgba(56,189,248,0.09), transparent 55%),
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: auto, auto, 42px 42px, 42px 42px;
+    pointer-events: none;
+  }
+  canvas#particles {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    opacity: 0.65;
+  }
+  .stage {
+    position: relative;
+    width: 100%; height: 100vh;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  .caption {
+    position: absolute; top: 28px; left: 24px; right: 24px;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(250,250,250,0.4); font-weight: 500;
+  }
+  .tile {
+    position: absolute;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 20px;
+    padding: 20px 24px;
+    opacity: 0;
+    transform: translateY(28px) scale(0.97);
+    animation: rise 0.9s cubic-bezier(0.16,1,0.3,1) forwards;
+  }
+  @keyframes rise {
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .label {
+    font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(250,250,250,0.45); font-weight: 500; margin: 0 0 10px;
+  }
+  .grad-text {
+    background: linear-gradient(120deg, #6ee7b7, #a7f3d0 40%, #7dd3fc 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .warn-text {
+    background: linear-gradient(120deg, #fca5a5, #fde68a 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  /* Tile 1 — hero: symbol + trade levels */
+  #tile-hero {
+    left: 0; top: 90px; width: 400px;
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 0 50px -22px rgba(16,185,129,0.35);
+    z-index: 4; animation-delay: 0.05s;
+  }
+  #tile-hero h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
+  .dir-badge {
+    display: inline-flex; align-items: center; margin-left: 10px;
+    font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 999px;
+    background: rgba(16,185,129,0.14); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3);
+    vertical-align: middle;
+  }
+  .levels { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; margin-top: 18px; }
+  .levels div p { margin: 0; }
+  .levels .k { font-size: 10.5px; color: rgba(250,250,250,0.4); text-transform: uppercase; letter-spacing: 0.08em; }
+  .levels .v { font-size: 17px; font-weight: 500; margin-top: 3px; }
+  .live-row { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; align-items: baseline; justify-content: space-between; }
+
+  /* Tile 2 — conviction score dial */
+  #tile-score {
+    right: 0; top: 40px; width: 300px; text-align: center;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 0 60px -20px rgba(56,189,248,0.4);
+    transform-origin: center;
+    z-index: 5; animation-delay: 0.2s;
+  }
+  .score-num { font-size: 56px; font-weight: 500; line-height: 1; margin: 4px 0 6px; }
+  .score-sub { font-size: 12px; color: rgba(250,250,250,0.55); }
+  .breakdown { margin-top: 14px; display: flex; justify-content: center; gap: 14px; font-size: 11px; color: rgba(250,250,250,0.5); }
+  .breakdown b { color: #fafafa; font-weight: 500; }
+
+  /* Tile 3 — fundamentals forensic score */
+  #tile-fund {
+    left: 60px; top: 320px; width: 340px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 0 40px -24px rgba(16,185,129,0.25);
+    transform: rotate(-0.6deg);
+    z-index: 2; animation-delay: 0.35s;
+  }
+  .flag-row { display: flex; gap: 16px; margin-top: 10px; }
+  .flag { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .note { margin-top: 12px; font-size: 12px; color: rgba(250,250,250,0.5); line-height: 1.5; }
+
+  /* Tile 4 — ownership shift */
+  #tile-own {
+    right: 40px; top: 350px; width: 360px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 0 40px -24px rgba(252,165,165,0.3);
+    transform: rotate(0.7deg);
+    z-index: 3; animation-delay: 0.5s;
+  }
+  .shift-row { display: flex; align-items: baseline; gap: 10px; }
+  .shift-num { font-size: 22px; font-weight: 500; }
+  .arrow { color: #fca5a5; font-size: 18px; }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 34px; margin-top: 14px; }
+  .bars span { flex: 1; background: rgba(125,211,252,0.35); border-radius: 2px 2px 0 0; }
+
+  /* Tile 5 — event timeline, spans bottom */
+  #tile-events {
+    left: 24px; right: 24px; bottom: 34px; height: 148px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 0 50px -26px rgba(255,255,255,0.15);
+    z-index: 1; animation-delay: 0.65s;
+    display: flex; align-items: center; gap: 28px;
+    overflow: hidden;
+  }
+  .event { flex: 1; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 18px; }
+  .event:first-child { border-left: none; padding-left: 0; }
+  .event .when { font-size: 10.5px; color: rgba(250,250,250,0.4); text-transform: uppercase; letter-spacing: 0.08em; }
+  .event .what { font-size: 13px; margin-top: 6px; line-height: 1.5; color: rgba(250,250,250,0.85); }
+</style>
+</head>
+<body>
+
+<div id="vignette"></div>
+<canvas id="particles"></canvas>
+
+<div class="stage">
+  <p class="caption">Trade analytics pane — concept prototype · not live data</p>
+
+  <div class="tile" id="tile-hero">
+    <h1>WHIRLPOOL<span class="dir-badge">BUY</span></h1>
+    <div class="levels">
+      <div><p class="k">Entry</p><p class="v">₹816.0</p></div>
+      <div><p class="k">Target · T1</p><p class="v">₹859.0</p></div>
+      <div><p class="k">Stop</p><p class="v">₹797.0</p></div>
+      <div><p class="k">Days in</p><p class="v">2</p></div>
+    </div>
+    <div class="live-row">
+      <span style="font-size:12px;color:rgba(250,250,250,0.5)">Live ₹813.3</span>
+      <span style="font-size:15px;font-weight:500;color:#f87171">-0.3%</span>
+    </div>
+  </div>
+
+  <div class="tile" id="tile-score">
+    <p class="label">Conviction score</p>
+    <div class="score-num grad-text">62</div>
+    <p class="score-sub">Moderate — technical setup outrunning ownership signal</p>
+    <div class="breakdown">
+      <span>Technical <b>70</b></span>
+      <span>Fundamentals <b>55</b></span>
+      <span>Ownership <b>48</b></span>
+    </div>
+  </div>
+
+  <div class="tile" id="tile-fund">
+    <p class="label">Forensic quality — 17 checks</p>
+    <div class="flag-row">
+      <span class="flag"><span class="dot" style="background:#6ee7b7"></span>8 clean</span>
+      <span class="flag"><span class="dot" style="background:#f87171"></span>7 flagged</span>
+      <span class="flag"><span class="dot" style="background:#9ca3af"></span>2 neutral</span>
+    </div>
+    <p class="note">ROE rising on asset turnover, not leverage. Margins volatile, sales growth slow — balance sheet strong.</p>
+  </div>
+
+  <div class="tile" id="tile-own">
+    <p class="label">Ownership shift</p>
+    <div class="shift-row">
+      <span class="shift-num">51%</span>
+      <span class="arrow">→</span>
+      <span class="shift-num warn-text">39.76%</span>
+      <span style="font-size:12px;color:rgba(250,250,250,0.45)">promoter, Sep'24–Mar'25</span>
+    </div>
+    <div class="bars">
+      <span style="height:100%;background:rgba(125,211,252,0.5)"></span>
+      <span style="height:96%;background:rgba(125,211,252,0.45)"></span>
+      <span style="height:78%;background:rgba(125,211,252,0.4)"></span>
+      <span style="height:78%;background:rgba(248,113,113,0.55)"></span>
+      <span style="height:78%;background:rgba(248,113,113,0.5)"></span>
+    </div>
+  </div>
+
+  <div class="tile" id="tile-events">
+    <div class="event">
+      <p class="when">Mar '25</p>
+      <p class="what">Promoter stake reduced 51% → 39.76%</p>
+    </div>
+    <div class="event">
+      <p class="when">Jun '26</p>
+      <p class="what">Institutional buying accelerates — Nippon +8.5% qtr</p>
+    </div>
+    <div class="event">
+      <p class="when">Aug '26</p>
+      <p class="what">Q1 FY27 earnings release + concall transcript posted</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById("particles");
+  var ctx = canvas.getContext("2d");
+  var width = 0, height = 0;
+  var particles = [];
+  var mouse = { x: null, y: null, radius: 150 };
+
+  function initParticles() {
+    particles = [];
+    var count = Math.floor(Math.min(width, 1400) / 16);
+    for (var i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: (Math.random() - 0.5) * 0.6,
+        radius: Math.random() * 1.8 + 0.8,
+        color: Math.random() > 0.3 ? "16, 185, 129" : "56, 189, 248",
+        alpha: Math.random() * 0.5 + 0.2
+      });
+    }
+  }
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    width = canvas.clientWidth;
+    height = canvas.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    initParticles();
+  }
+
+  function connect() {
+    for (var a = 0; a < particles.length; a++) {
+      for (var b = a + 1; b < particles.length; b++) {
+        var dx = particles[a].x - particles[b].x;
+        var dy = particles[a].y - particles[b].y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 110) {
+          var opacity = (1 - dist / 110) * 0.2;
+          ctx.strokeStyle = "rgba(56, 189, 248, " + opacity + ")";
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          ctx.moveTo(particles[a].x, particles[a].y);
+          ctx.lineTo(particles[b].x, particles[b].y);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, width, height);
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > width) p.vx *= -1;
+      if (p.y < 0 || p.y > height) p.vy *= -1;
+      if (mouse.x !== null) {
+        var dx = mouse.x - p.x, dy = mouse.y - p.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < mouse.radius) {
+          var angle = Math.atan2(dy, dx);
+          var force = (mouse.radius - dist) / mouse.radius;
+          p.x -= Math.cos(angle) * force * 2.4;
+          p.y -= Math.sin(angle) * force * 2.4;
+        }
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(" + p.color + ", " + p.alpha + ")";
+      ctx.fill();
+    }
+    connect();
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("mousemove", function (e) {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+  });
+  window.addEventListener("mouseleave", function () {
+    mouse.x = null; mouse.y = null;
+  });
+
+  resize();
+  frame();
+})();
+</script>
+
+</body>
+</html>
