@@ -101,12 +101,20 @@ export default async function TrackRecordPage() {
             </span>
             <span className="text-sm font-semibold tracking-tight">Signals</span>
           </div>
-          <Link
-            href="/dashboard"
-            className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-          >
-            ← Signal feed
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/dashboard/stocks"
+              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+            >
+              Stock analytics
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+            >
+              ← Signal feed
+            </Link>
+          </div>
         </div>
       </header>
 

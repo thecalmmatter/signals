@@ -52,6 +52,12 @@ export default async function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <Link
+              href="/dashboard/stocks"
+              className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
+            >
+              Stock analytics
+            </Link>
+            <Link
               href="/dashboard/track-record"
               className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
             >

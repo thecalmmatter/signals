@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { loadLiveSignals } from "@/lib/live-signals";
-import { getStockDetails, isIndianStockApiConfigured, type StockDetails } from "@/lib/indian-stock-api";
+import { getOrPopulateStockDetails } from "@/lib/stock-analytics-cache";
 import { StockAnalyticsPane } from "@/components/stock-analytics-pane";
 
 export const dynamic = "force-dynamic";
@@ -23,23 +23,21 @@ export default async function StockAnalyticsPage({
   const { signals } = await loadLiveSignals();
   const signal = signals.find((s) => s.symbol === symbol) ?? null;
 
-  let stock: StockDetails | null = null;
-  let stockError: string | null = null;
-  if (isIndianStockApiConfigured()) {
-    try {
-      stock = await getStockDetails(symbol);
-    } catch (error) {
-      console.error(`GET /dashboard/stocks/${symbol}: Indian API fetch failed`, error);
-      stockError = "Research data temporarily unavailable.";
-    }
-  }
+  // Reads from stock_analytics_cache (lib/stock-analytics-cache.ts) — only
+  // falls through to a live upstream fetch on a true cache miss (a symbol
+  // never attempted before), so a normal page view doesn't re-hit the
+  // rate-limited third-party API every time.
+  const { stock, error: stockError } = await getOrPopulateStockDetails(symbol);
 
   return (
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-40 border-b border-zinc-800/60 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-4 px-6">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-6">
           <Link href="/dashboard" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">
             ← Dashboard
+          </Link>
+          <Link href="/dashboard/stocks" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">
+            All stocks
           </Link>
         </div>
       </header>

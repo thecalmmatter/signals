@@ -4,38 +4,15 @@
 // productionized from the throwaway prototype (prototypes/analytics-pane-prototype.html)
 // into a real component fed by real props instead of hardcoded numbers.
 //
-// Data shape caveat: analyst.indianapi.in's docs show analystView/recosBar/
-// riskMeter/shareholding fields only as "..." placeholders — the exact keys
-// haven't been confirmed against a live response yet (no API key tested
-// against production so far). Every read below is defensive (tries a few
-// likely field names, falls back to "—") for exactly that reason. Once a
-// real INDIAN_STOCK_API_KEY is set and this page has actually been hit,
-// inspect the real payload and tighten lib/indian-stock-api.ts's types +
-// the field lookups here.
+// Field shapes here match a real, authenticated stock.indianapi.in response
+// (see lib/indian-stock-api.ts) — recosBar/analystView/riskMeter/shareholding
+// are no longer guessed.
 
 import { LandingParticleCanvas } from "./landing-particle-canvas";
 import type { LiveSignal } from "@/lib/live-signals";
-import type { StockDetails } from "@/lib/indian-stock-api";
+import type { StockDetails, RecosBar, ShareholdingCategory, CorporateActionData } from "@/lib/indian-stock-api";
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
-
-function pickNumber(obj: Record<string, unknown> | null | undefined, keys: string[]): number | null {
-  if (!obj) return null;
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === "number") return v;
-  }
-  return null;
-}
-
-function pickString(obj: Record<string, unknown> | null | undefined, keys: string[]): string | null {
-  if (!obj) return null;
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
 
 function returnPct(signal: LiveSignal): number | null {
   if (!signal.entry || signal.entry <= 0) return null;
@@ -43,18 +20,54 @@ function returnPct(signal: LiveSignal): number | null {
   return signal.signal === "sell" ? -raw : raw;
 }
 
+function recoCounts(recosBar: RecosBar): { buy: number; hold: number; sell: number } {
+  const rows = recosBar?.stockAnalyst ?? [];
+  const find = (name: string) => rows.find((r) => r.ratingName === name)?.numberOfAnalysts ?? 0;
+  return {
+    buy: find("Strong Buy") + find("Buy"),
+    hold: find("Hold"),
+    sell: find("Sell") + find("Strong Sell"),
+  };
+}
+
+function latestShareholdingPct(shareholding: ShareholdingCategory[] | null, displayName: string): number | null {
+  const row = shareholding?.find((s) => s.displayName === displayName);
+  const last = row?.categories[row.categories.length - 1];
+  if (!last) return null;
+  const v = Number(last.percentage);
+  return Number.isFinite(v) ? v : null;
+}
+
+type FlatAction = { label: string; date: string; remarks: string };
+
+function flattenCorporateActions(data: CorporateActionData): FlatAction[] {
+  if (!data) return [];
+  const out: FlatAction[] = [];
+  const push = (label: string, arr: Record<string, unknown>[] | undefined) => {
+    for (const a of arr ?? []) {
+      const date = (a.recordDate as string) || (a.agmDate as string) || (a.dateOfAnnouncement as string) || "";
+      const remarks = (a.remarks as string) || (a.purpose as string) || label;
+      out.push({ label, date, remarks });
+    }
+  };
+  push("Bonus", data.bonus);
+  push("Dividend", data.dividend);
+  push("Rights", data.rights);
+  push("Split", data.splits);
+  push("AGM", data.annualGeneralMeeting);
+  return out.filter((a) => a.date).sort((a, b) => b.date.localeCompare(a.date));
+}
+
 // First-pass heuristic composite, 0-100. Deliberately simple and openly
-// approximate — refine once analystView/shareholding's real shape is known.
+// approximate.
 function convictionScore(signal: LiveSignal | null, stock: StockDetails | null) {
   const technical = !signal ? 50 : signal.outcome === "target_hit" ? 90 : signal.outcome === "stopped" ? 20 : 65;
 
-  const buy = pickNumber(stock?.recosBar ?? null, ["buy", "strongBuy", "Buy"]);
-  const sell = pickNumber(stock?.recosBar ?? null, ["sell", "strongSell", "Sell"]);
-  const hold = pickNumber(stock?.recosBar ?? null, ["hold", "Hold"]);
-  const totalRecos = (buy ?? 0) + (sell ?? 0) + (hold ?? 0);
-  const analyst = totalRecos > 0 ? Math.round((((buy ?? 0) + (hold ?? 0) * 0.5) / totalRecos) * 100) : 50;
+  const { buy, hold, sell } = recoCounts(stock?.recosBar ?? null);
+  const totalRecos = buy + sell + hold;
+  const analyst = totalRecos > 0 ? Math.round(((buy + hold * 0.5) / totalRecos) * 100) : 50;
 
-  const promoterPct = pickNumber(stock?.shareholding ?? null, ["promoter", "Promoter", "promoterHolding"]);
+  const promoterPct = latestShareholdingPct(stock?.shareholding ?? null, "Promoter");
   const ownership = promoterPct === null ? 50 : promoterPct >= 50 ? 70 : promoterPct >= 25 ? 55 : 40;
 
   const overall = Math.round(technical * 0.4 + analyst * 0.35 + ownership * 0.25);
@@ -75,17 +88,15 @@ export function StockAnalyticsPane({
   const score = convictionScore(signal, stock);
   const pct = signal ? returnPct(signal) : null;
 
-  const buy = pickNumber(stock?.recosBar ?? null, ["buy", "strongBuy", "Buy"]);
-  const sell = pickNumber(stock?.recosBar ?? null, ["sell", "strongSell", "Sell"]);
-  const hold = pickNumber(stock?.recosBar ?? null, ["hold", "Hold"]);
-  const riskLabel = pickString(stock?.riskMeter ?? null, ["riskLevel", "category", "label", "risk"]);
+  const { buy, hold, sell } = recoCounts(stock?.recosBar ?? null);
+  const riskLabel = stock?.riskMeter?.categoryName ?? null;
 
-  const promoterPct = pickNumber(stock?.shareholding ?? null, ["promoter", "Promoter", "promoterHolding"]);
-  const fiiPct = pickNumber(stock?.shareholding ?? null, ["fii", "FII", "fiiHolding"]);
-  const diiPct = pickNumber(stock?.shareholding ?? null, ["dii", "DII", "diiHolding"]);
-  const publicPct = pickNumber(stock?.shareholding ?? null, ["public", "Public", "publicHolding"]);
+  const promoterPct = latestShareholdingPct(stock?.shareholding ?? null, "Promoter");
+  const fiiPct = latestShareholdingPct(stock?.shareholding ?? null, "FII");
+  const mfPct = latestShareholdingPct(stock?.shareholding ?? null, "MF");
+  const otherPct = latestShareholdingPct(stock?.shareholding ?? null, "Other");
 
-  const corporateActions = Array.isArray(stock?.stockCorporateActionData) ? stock!.stockCorporateActionData : [];
+  const corporateActions = flattenCorporateActions(stock?.stockCorporateActionData ?? null);
   const news = stock?.recentNews ?? [];
 
   return (
@@ -182,12 +193,12 @@ export function StockAnalyticsPane({
             {stock ? (
               <>
                 <div className="mt-3 flex gap-5 text-sm font-medium">
-                  <span className="text-emerald-400">{buy ?? "—"} buy</span>
-                  <span className="text-zinc-400">{hold ?? "—"} hold</span>
-                  <span className="text-red-400">{sell ?? "—"} sell</span>
+                  <span className="text-emerald-400">{buy} buy</span>
+                  <span className="text-zinc-400">{hold} hold</span>
+                  <span className="text-red-400">{sell} sell</span>
                 </div>
                 <p className="mt-3 text-xs leading-5 text-zinc-500">
-                  Risk: {riskLabel ?? "not reported"}. Analyst consensus is third-party (analyst.indianapi.in), not this app&rsquo;s own view.
+                  Risk: {riskLabel ?? "not reported"}. Analyst consensus is third-party (indianapi.in), not this app&rsquo;s own view.
                 </p>
               </>
             ) : (
@@ -211,12 +222,12 @@ export function StockAnalyticsPane({
                   <p className="text-[10px] text-zinc-500">FII</p>
                 </div>
                 <div>
-                  <p className="text-lg font-medium">{diiPct ?? "—"}{diiPct !== null ? "%" : ""}</p>
-                  <p className="text-[10px] text-zinc-500">DII</p>
+                  <p className="text-lg font-medium">{mfPct ?? "—"}{mfPct !== null ? "%" : ""}</p>
+                  <p className="text-[10px] text-zinc-500">MF</p>
                 </div>
                 <div>
-                  <p className="text-lg font-medium">{publicPct ?? "—"}{publicPct !== null ? "%" : ""}</p>
-                  <p className="text-[10px] text-zinc-500">Public</p>
+                  <p className="text-lg font-medium">{otherPct ?? "—"}{otherPct !== null ? "%" : ""}</p>
+                  <p className="text-[10px] text-zinc-500">Other</p>
                 </div>
               </div>
             ) : (
@@ -237,14 +248,14 @@ export function StockAnalyticsPane({
               <ul className="mt-3 space-y-3">
                 {corporateActions.slice(0, 3).map((action, i) => (
                   <li key={`ca-${i}`} className="text-sm leading-5 text-zinc-300">
-                    {typeof action === "string" ? action : JSON.stringify(action)}
+                    <span className="text-zinc-500">{action.date}</span> · {action.label}: {action.remarks}
                   </li>
                 ))}
                 {news.slice(0, 3).map((item, i) => (
                   <li key={`news-${i}`} className="text-sm leading-5">
                     {item.url ? (
                       <a
-                        href={item.url}
+                        href={item.url.startsWith("http") ? item.url : `https://www.livemint.com${item.url}`}
                         target="_blank"
                         rel="noreferrer"
                         className="text-zinc-300 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-50"

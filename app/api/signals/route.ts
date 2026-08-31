@@ -6,6 +6,7 @@ import { getAccessStatus } from "@/lib/access";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
 import { loadLiveSignals } from "@/lib/live-signals";
+import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -165,6 +166,11 @@ export async function POST(req: Request) {
       console.error("upsertPositionFromSignal failed (run scripts/migration_positions_signal_link.sql?)", error);
     }
   }
+
+  // Best-effort — populates the stock analytics cache the first time this
+  // symbol is manually added, so /dashboard/stocks/[symbol] is ready without
+  // waiting for an admin to click refresh. No-ops instantly if already cached.
+  await ensureStockAnalyticsCached(symbol);
 
   const row = await pool.query(`SELECT ${ADMIN_COLUMNS} FROM signals WHERE id = $1`, [id]);
   return json({ signal: mapAdminRow(row.rows[0]) }, existing.rows[0] ? 200 : 201);

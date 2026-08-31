@@ -3,9 +3,12 @@ import { getPool } from "@/lib/db";
 import { getAdminUserId } from "@/lib/admin";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { POSITION_COLUMNS, mapPositionRow, loadLivePricesFor } from "@/lib/positions-admin";
+import { isIndianStockApiConfigured } from "@/lib/indian-stock-api";
+import { listStockAnalyticsStatus } from "@/lib/stock-analytics-cache";
 import AdminSignals from "@/components/admin-signals";
 import AdminScanMappings from "@/components/admin-scan-mappings";
 import AdminPositions from "@/components/admin-positions";
+import AdminStockAnalytics from "@/components/admin-stock-analytics";
 import { ActivityFeed } from "@/components/activity-feed";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +47,7 @@ export default async function AdminPage() {
   }));
   const positions = await loadPositions();
   const livePrices = await loadLivePricesFor(positions);
+  const stockAnalyticsRows = await listStockAnalyticsStatus();
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-950 text-zinc-100">
@@ -96,6 +100,18 @@ export default async function AdminPage() {
             future win-rate / statistical-edge report.
           </p>
           <AdminPositions positions={positions} livePrices={livePrices} />
+        </div>
+        <div className="mt-8">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight text-zinc-50">
+            Stock analytics pipeline
+          </h2>
+          <p className="mb-4 text-sm text-zinc-400">
+            Populates the per-stock research pane (analyst view, shareholding,
+            corporate actions, news) shown at /dashboard/stocks/[symbol]. New
+            symbols are fetched automatically the first time they show up as a
+            signal — use these buttons to backfill or force a fresh pull.
+          </p>
+          <AdminStockAnalytics rows={stockAnalyticsRows} configured={isIndianStockApiConfigured()} />
         </div>
       </main>
     </div>

@@ -65,6 +65,7 @@ psql "$DATABASE_URL" -f scripts/migration_waitlist_block.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_leads.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_snapshot_digest.sql
+psql "$DATABASE_URL" -f scripts/migration_stock_analytics_cache.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -374,8 +375,16 @@ alike), not just what closed recently. Same numbers as
 `/dashboard/stocks/[symbol]` — a dedicated page per symbol (not the
 tap-to-open chart/RSI modal, which stays a quick glance) combining this
 app's own live signal state with third-party research: analyst consensus,
-shareholding, corporate actions, and recent news. Linked from the "Full
-analysis" row inside `signal-detail-modal.tsx`.
+shareholding, corporate actions, and recent news.
+
+- **Discoverability**: `/dashboard/stocks` is a real index page — every
+  currently-active symbol as a direct, clickable card — linked from the
+  dashboard header nav ("Stock analytics") and the track-record header.
+  The original path (open a ticker card's back face → tap to open the
+  modal → scroll to "Full analysis") still works from
+  `signal-detail-modal.tsx`, but it's no longer the *only* way in; that
+  buried-ness was the actual bug — the feature was built and working, just
+  unreachable in practice.
 
 - **Data sources, deliberately split two ways**: trade levels/outcome come
   from `loadLiveSignals()` (§ live-signals — same source as the ticker, so
@@ -383,22 +392,25 @@ analysis" row inside `signal-detail-modal.tsx`.
   buy/hold/sell, shareholding %, corporate actions, recent news — comes from
   a separate REST API, **not** from any MCP connector: MCP tools (Tijori
   Finance was explored first) are only callable by an AI agent in a chat
-  session, not by this app's own backend at runtime. `analyst.indianapi.in`
+  session, not by this app's own backend at runtime. `stock.indianapi.in`
   is a real API this app can call directly with its own key.
 - Set `INDIAN_STOCK_API_KEY` (get one at indianapi.in) — see `.env.example`
   for the exact curl to test it. Leave blank to disable; the page still
   works, those tiles just show "not configured."
 - `lib/indian-stock-api.ts` — `getStockDetails(symbol)`, a single
-  `GET /stock?symbol=X` call that returns financials, analyst view,
+  `GET /stock?name=X` call that returns financials, analyst view,
   shareholding, corporate actions, and news together. Cached 30 minutes
   (this is a per-page-view lookup a human triggers by clicking through, not
-  a polled endpoint like the ticker). **Field-shape caveat**: the API's own
-  docs only show `analystView`/`recosBar`/`riskMeter`/`shareholding` as
-  `"..."` placeholders — the exact keys haven't been confirmed against a
-  real response yet. `components/stock-analytics-pane.tsx` reads them
-  defensively (tries a few likely field names, falls back to "—"). Once a
-  real key is set and the page has actually been hit, inspect the real
-  payload and tighten both files' field lookups.
+  a polled endpoint like the ticker). **Gotcha, confirmed the hard way**: the
+  docs site lives at `analyst.indianapi.in` and shows the query param as
+  `symbol`, but the real API host is `stock.indianapi.in` and the param is
+  actually `name` — `symbol` 422s. Plain NSE tickers work fine as the `name`
+  value (fuzzy-matched). Field shapes (`recosBar.stockAnalyst[]`,
+  `shareholding[].categories[]`, `stockCorporateActionData.{bonus,dividend,
+  rights,splits,annualGeneralMeeting}`, numeric-looking fields returned as
+  strings) are taken from a real authenticated response and typed exactly in
+  `lib/indian-stock-api.ts` — no more defensive guessing in
+  `components/stock-analytics-pane.tsx`.
 - **Conviction score** (0-100, shown big on the page): a first-pass
   heuristic — 40% the live signal's technical state, 35% analyst
   buy/hold/sell mix, 25% promoter shareholding level. Openly approximate,
@@ -410,6 +422,30 @@ analysis" row inside `signal-detail-modal.tsx`.
   particle field. Prototype this was built from:
   `prototypes/analytics-pane-prototype.html` (static demo, not wired to
   real data).
+- **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
+  `lib/stock-analytics-cache.ts`): every page view used to call the Indian
+  API live — slow on first load and wasteful against a rate-limited
+  third-party key, and with no way to pre-populate a symbol before anyone
+  clicks through. `stock_analytics_cache` (one row per symbol, `data`
+  JSONB + `fetched_at` + `error`) fixes both:
+  - **Auto-populate on ingestion**: `ensureStockAnalyticsCached(symbol)` runs
+    (best-effort, never throws) from both the Chartlink webhook and the
+    manual "add signal" route the first time a symbol is seen — a newly
+    published stock's analytics tile is ready by the time anyone opens it,
+    not fetched cold on first view. Already-cached symbols are a single
+    indexed lookup, so this costs nothing on the (common) repeat case.
+  - **Admin pipeline panel** (`/dashboard/admin` → "Stock analytics
+    pipeline", `components/admin-stock-analytics.tsx`): one row per active
+    symbol showing cached/failed/never-fetched status, last-attempt time,
+    and the error if one occurred — with a per-symbol "Refresh" button and
+    a top-level "Refresh all" for backfilling or forcing a fresh pull.
+    Backed by `GET/POST /api/admin/stock-analytics[/refresh]`.
+  - **Page read path**: `getOrPopulateStockDetails(symbol)` trusts an
+    existing cache row (success or failure) as-is — freshness is the
+    admin's job via the refresh buttons, not re-fetched every page view.
+    Only a true "never attempted" miss (e.g. a symbol older than this
+    table) triggers a one-time write-through fetch, so the page never just
+    shows nothing.
 
 ## Useful commands
 

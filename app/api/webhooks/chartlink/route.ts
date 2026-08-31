@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
 
 // Chartlink webhook ingestion. PUBLIC by design — proxy.ts does NOT gate this
 // path (Chartlink cannot authenticate via Clerk). Auth = shared secret token in
@@ -280,6 +281,16 @@ export async function POST(req: Request) {
     });
     processed += 1;
   }
+
+  // Best-effort, in parallel, awaited (serverless functions can stop running
+  // once the response is sent, so this has to finish before we return) —
+  // populates the stock analytics cache for any symbol seen here for the
+  // first time, so /dashboard/stocks/[symbol] is ready by the time anyone
+  // clicks through instead of cold-fetching on the first visit. Already-
+  // cached symbols (the common case — same stocks trigger repeatedly through
+  // a trading day) are a single indexed lookup each, not a re-fetch.
+  const uniqueSymbols = [...new Set(parsed.symbols.map((s) => s.toUpperCase()))];
+  await Promise.allSettled(uniqueSymbols.map((symbol) => ensureStockAnalyticsCached(symbol)));
 
   return json({ ok: true, processed, skipped: 0 }, 200);
 }
