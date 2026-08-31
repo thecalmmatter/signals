@@ -8,7 +8,9 @@
 // (see lib/indian-stock-api.ts) — recosBar/analystView/riskMeter/shareholding
 // are no longer guessed.
 
+import type { CSSProperties } from "react";
 import { LandingParticleCanvas } from "./landing-particle-canvas";
+import { stockViewTransitionName } from "./symbol-link";
 import type { LiveSignal } from "@/lib/live-signals";
 import type { StockDetails, RecosBar, ShareholdingCategory, CorporateActionData } from "@/lib/indian-stock-api";
 
@@ -121,7 +123,12 @@ export function StockAnalyticsPane({
           {/* Trade levels */}
           <div className="glass-panel rounded-2xl p-6" style={{ boxShadow: "0 0 50px -22px rgba(16,185,129,0.35)" }}>
             <div className="flex items-baseline gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight">{symbol}</h1>
+              <h1
+                className="text-2xl font-semibold tracking-tight"
+                style={{ viewTransitionName: stockViewTransitionName(symbol) } as CSSProperties}
+              >
+                {symbol}
+              </h1>
               {signal ? (
                 <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-400/30">
                   {signal.outcome === "stopped" ? "stopped" : signal.outcome === "target_hit" ? "target hit" : signal.signal}

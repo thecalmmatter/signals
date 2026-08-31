@@ -131,10 +131,14 @@ export default function AdminStockAnalytics({
       )}
       <div className="flex items-center justify-between">
         <p className="text-xs text-zinc-500">
-          {rows.length} active symbol{rows.length === 1 ? "" : "s"} · analytics data for{" "}
-          <Link href="/dashboard/stocks" className="underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300">
-            /dashboard/stocks
-          </Link>
+          {rows.length} active symbol{rows.length === 1 ? "" : "s"} · click a symbol on{" "}
+          <Link
+            href="/dashboard/track-record"
+            className="underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300"
+          >
+            the track record page
+          </Link>{" "}
+          to view its research pane
         </p>
         <button
           type="button"

@@ -36,8 +36,11 @@ export default async function StockAnalyticsPage({
           <Link href="/dashboard" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">
             ← Dashboard
           </Link>
-          <Link href="/dashboard/stocks" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">
-            All stocks
+          <Link
+            href="/dashboard/track-record"
+            className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+          >
+            Track record
           </Link>
         </div>
       </header>

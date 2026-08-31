@@ -24,6 +24,17 @@ body {
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* ---- Symbol -> stock analytics page morph (components/symbol-link.tsx) ----
+   Named per-symbol via view-transition-name (set inline, dynamic), so the
+   browser morphs the clicked symbol text directly into the destination
+   page's <h1>. No-op / ignored entirely on browsers without View
+   Transitions support (Safari/Firefox at time of writing) — pure
+   progressive enhancement, nothing else depends on this running. */
+::view-transition-group(*) {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* ---- Ticker marquee (pure CSS, duplicated list + transform) ---- */
 
 @keyframes ticker-scroll {

@@ -497,18 +497,6 @@ export function SignalDetailModal({
             </div>
           </div>
 
-          {!guest && (
-            <Link
-              href={`/dashboard/stocks/${stock.symbol}`}
-              className="mt-3 flex w-full items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
-            >
-              <span>Full analysis — fundamentals, analyst view, events</span>
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden="true">
-                <path d="M8 1l5 5H9v9H7V6H3l5-5z" transform="rotate(90 8 8)" />
-              </svg>
-            </Link>
-          )}
-
           {guest ? (
             <AskBarLocked />
           ) : (

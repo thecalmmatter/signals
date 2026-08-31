@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { loadLiveSignals, type LiveSignal } from "@/lib/live-signals";
+import { SymbolLink } from "@/components/symbol-link";
 
 export const dynamic = "force-dynamic";
 
@@ -101,20 +102,12 @@ export default async function TrackRecordPage() {
             </span>
             <span className="text-sm font-semibold tracking-tight">Signals</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Link
-              href="/dashboard/stocks"
-              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-            >
-              Stock analytics
-            </Link>
-            <Link
-              href="/dashboard"
-              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-            >
-              ← Signal feed
-            </Link>
-          </div>
+          <Link
+            href="/dashboard"
+            className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+          >
+            ← Signal feed
+          </Link>
         </div>
       </header>
 
@@ -190,7 +183,14 @@ export default async function TrackRecordPage() {
                 const ret = returnPct(s);
                 return (
                   <tr key={s.symbol} className="bg-zinc-950">
-                    <td className="px-3 py-2.5 font-medium text-zinc-100">{s.symbol}</td>
+                    <td className="px-3 py-2.5">
+                      <SymbolLink
+                        symbol={s.symbol}
+                        className="font-medium text-zinc-100 decoration-zinc-600 decoration-dotted underline-offset-4 transition-colors hover:text-emerald-400 hover:underline"
+                      >
+                        {s.symbol}
+                      </SymbolLink>
+                    </td>
                     <td className="px-3 py-2.5">
                       <DirBadge s={s} />
                     </td>

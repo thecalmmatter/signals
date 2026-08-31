@@ -377,14 +377,19 @@ tap-to-open chart/RSI modal, which stays a quick glance) combining this
 app's own live signal state with third-party research: analyst consensus,
 shareholding, corporate actions, and recent news.
 
-- **Discoverability**: `/dashboard/stocks` is a real index page — every
-  currently-active symbol as a direct, clickable card — linked from the
-  dashboard header nav ("Stock analytics") and the track-record header.
-  The original path (open a ticker card's back face → tap to open the
-  modal → scroll to "Full analysis") still works from
-  `signal-detail-modal.tsx`, but it's no longer the *only* way in; that
-  buried-ness was the actual bug — the feature was built and working, just
-  unreachable in practice.
+- **Discoverability**: the track-record page (`/dashboard/track-record`) is
+  the *only* entry point, by design — every symbol in that table is a
+  near-invisible link (`components/symbol-link.tsx`): no button chrome, just
+  the symbol text with a subtle hover underline. Clicking it (plain left
+  click — modifier/middle clicks still open in a new tab normally) animates
+  into `/dashboard/stocks/[symbol]` via the native View Transitions API: the
+  table cell and the destination page's `<h1>` share a per-symbol
+  `view-transition-name`, so supporting browsers morph the symbol text
+  directly into the page title instead of a hard cut. Browsers without
+  support (Safari/Firefox at time of writing) just get an instant
+  navigation — pure progressive enhancement, nothing depends on it running.
+  An earlier version of this added a separate `/dashboard/stocks` index page
+  and extra nav links; removed in favor of this single, quieter path.
 
 - **Data sources, deliberately split two ways**: trade levels/outcome come
   from `loadLiveSignals()` (§ live-signals — same source as the ticker, so
