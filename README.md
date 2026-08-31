@@ -448,9 +448,14 @@ shareholding, corporate actions, and recent news.
   - **Page read path**: `getOrPopulateStockDetails(symbol)` trusts an
     existing cache row (success or failure) as-is — freshness is the
     admin's job via the refresh buttons, not re-fetched every page view.
-    Only a true "never attempted" miss (e.g. a symbol older than this
-    table) triggers a one-time write-through fetch, so the page never just
-    shows nothing.
+    A true "never attempted" miss does **not** await a live fetch inline —
+    that used to be exactly what made the symbol→analytics navigation feel
+    slow (the page render blocked on an external HTTP call, up to its 8s
+    timeout, before anything could be sent to the browser). It's now
+    scheduled with Next's `after()` to run once the response has already
+    gone out, and the page returns immediately with a "fetching for the
+    first time" message; `stock-analytics-pane.tsx` auto-refreshes itself
+    once ~3.5s later to pick up the result without a manual reload.
 
 ## Useful commands
 

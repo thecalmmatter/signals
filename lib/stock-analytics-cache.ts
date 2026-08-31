@@ -20,9 +20,13 @@
 // retrying automatically on every single-symbol touch would defeat the point
 // of caching; the admin panel surfaces the failure for a manual retry instead.
 
+import { after } from "next/server";
 import { getPool } from "./db";
 import { getStockDetails, isIndianStockApiConfigured, type StockDetails } from "./indian-stock-api";
 import { loadLiveSignals } from "./live-signals";
+import { STOCK_ANALYTICS_POPULATING_MESSAGE } from "./stock-analytics-messages";
+
+export { STOCK_ANALYTICS_POPULATING_MESSAGE };
 
 const MIGRATION_HINT = "run scripts/migration_stock_analytics_cache.sql?";
 
@@ -126,12 +130,23 @@ export async function ensureStockAnalyticsCached(symbol: string): Promise<void> 
   }
 }
 
-/** Read path for /dashboard/stocks/[symbol] itself. Trusts an existing cache
- * row (success or failure) as-is — freshness is the admin's job via the
- * refresh buttons, not re-fetched on every page view. Only a true "never
- * attempted" miss triggers a write-through fetch here, so the page never
- * shows nothing just because the ingestion-time auto-populate hasn't run yet
- * (e.g. a symbol added before this cache existed). */
+/** Read path for /dashboard/stocks/[symbol] itself — a single indexed SELECT,
+ * always fast, NEVER awaits the upstream Indian API. Trusts an existing
+ * cache row (success or failure) as-is — freshness is the admin's job via
+ * the refresh buttons, not re-fetched on every page view.
+ *
+ * Previously, a true "never attempted" miss awaited refreshStockAnalytics()
+ * inline — i.e. the page render blocked on a live external HTTP call (up to
+ * its 8s timeout) before a single byte could be sent to the browser. That
+ * was the actual cause of "clicking a symbol feels slow": every first visit
+ * to any not-yet-cached symbol paid that full latency synchronously, and
+ * with the auto-populate pipeline being new, most pre-existing symbols
+ * hadn't been attempted yet — so nearly every click hit this path.
+ *
+ * Fix: on a true miss, schedule the fetch with next/server's after() —
+ * runs once the response has been sent, so it can't block this render — and
+ * return immediately with a "still populating" message. The very next visit
+ * (or the admin's Refresh button) will have real data. */
 export async function getOrPopulateStockDetails(
   symbol: string
 ): Promise<{ stock: StockDetails | null; error: string | null }> {
@@ -140,12 +155,8 @@ export async function getOrPopulateStockDetails(
   if (cached.fetchedAt !== null) {
     return { stock: cached.stock, error: cached.error };
   }
-  const result = await refreshStockAnalytics(symbol);
-  if (!result.ok) {
-    return { stock: null, error: result.error ?? "Research data temporarily unavailable." };
-  }
-  const fresh = await getCachedStockDetails(symbol);
-  return { stock: fresh.stock, error: fresh.error };
+  after(() => refreshStockAnalytics(symbol));
+  return { stock: null, error: STOCK_ANALYTICS_POPULATING_MESSAGE };
 }
 
 /** Status list for the admin panel — one row per currently-active symbol,

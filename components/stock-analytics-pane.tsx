@@ -8,11 +8,13 @@
 // (see lib/indian-stock-api.ts) — recosBar/analystView/riskMeter/shareholding
 // are no longer guessed.
 
-import type { CSSProperties } from "react";
+import { useEffect, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { LandingParticleCanvas } from "./landing-particle-canvas";
 import { stockViewTransitionName } from "./symbol-link";
 import type { LiveSignal } from "@/lib/live-signals";
 import type { StockDetails, RecosBar, ShareholdingCategory, CorporateActionData } from "@/lib/indian-stock-api";
+import { STOCK_ANALYTICS_POPULATING_MESSAGE } from "@/lib/stock-analytics-messages";
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
 
@@ -87,6 +89,19 @@ export function StockAnalyticsPane({
   stock: StockDetails | null;
   stockError?: string | null;
 }) {
+  const router = useRouter();
+
+  // First-ever visit to a symbol: the page didn't wait on the live fetch
+  // (see lib/stock-analytics-cache.ts getOrPopulateStockDetails — that
+  // inline wait was what made navigation feel slow), so it's running in the
+  // background instead. One automatic refresh a few seconds later picks up
+  // the result without the visitor needing to manually reload.
+  useEffect(() => {
+    if (stockError !== STOCK_ANALYTICS_POPULATING_MESSAGE) return;
+    const timer = setTimeout(() => router.refresh(), 3500);
+    return () => clearTimeout(timer);
+  }, [stockError, router]);
+
   const score = convictionScore(signal, stock);
   const pct = signal ? returnPct(signal) : null;
 
