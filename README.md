@@ -427,6 +427,23 @@ shareholding, corporate actions, and recent news.
   particle field. Prototype this was built from:
   `prototypes/analytics-pane-prototype.html` (static demo, not wired to
   real data).
+- **Conviction score is shared, not pane-only** — `lib/conviction-score.ts`
+  holds `convictionScore()`/`recoCounts()`/`latestShareholdingPct()` (moved
+  out of `stock-analytics-pane.tsx`, which now just imports them) so the
+  track-record page (`/dashboard/track-record`) can render the same score
+  per row in a `Score` column, batch-read via
+  `getCachedStockDetailsBatch(symbols)` — one query for every visible
+  symbol, read-only, never triggers a live fetch. A symbol with no cached
+  research data shows `—` rather than a heuristic built entirely on the
+  50/50 defaults, which would look like a real score when it isn't one.
+- **Track record: closed trades don't show a live price.** Once a signal's
+  outcome locks (`stopped`/`target_hit`), the "Live" column shows the frozen
+  `exitPrice` (see `lib/live-signals.ts`) instead of the still-drifting live
+  quote — a stopped trade floating back above its stop hours later was
+  confusing to look at. Return % and the T1/T2/T3 "reached" checkmarks use
+  the same frozen reference price for closed trades (`referencePrice()` in
+  `app/dashboard/track-record/page.tsx`), so a closed trade's numbers stop
+  moving the instant it closes, exactly like a real trade book.
 - **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
   `lib/stock-analytics-cache.ts`): every page view used to call the Indian
   API live — slow on first load and wasteful against a rate-limited

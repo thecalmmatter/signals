@@ -2,6 +2,8 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { loadLiveSignals, type LiveSignal } from "@/lib/live-signals";
+import { getCachedStockDetailsBatch } from "@/lib/stock-analytics-cache";
+import { convictionScore, type ConvictionScore } from "@/lib/conviction-score";
 import { SymbolLink } from "@/components/symbol-link";
 
 export const dynamic = "force-dynamic";
@@ -14,24 +16,56 @@ function daysSince(generatedAt: string): number {
   return Math.max(0, Math.round((Date.now() - start) / 86_400_000));
 }
 
-// Return since the signal was generated, using its stated entry price
-// against the live quote already merged in by loadLiveSignals. null if the
+// The price to judge a trade against: once closed (stopped/target_hit), that
+// is the frozen exit price, never the live quote — the live price keeps
+// drifting after the fact (a "stopped" trade can float back above the stop
+// hours later), which was exactly the confusing bit. Falls back to the live
+// price if a legacy row somehow has no exit price recorded.
+function referencePrice(s: LiveSignal): number {
+  if ((s.outcome === "stopped" || s.outcome === "target_hit") && s.exitPrice !== null) {
+    return s.exitPrice;
+  }
+  return s.price;
+}
+
+// Return since the signal was generated: live price vs entry while open,
+// frozen exit price vs entry once closed — see referencePrice(). null if the
 // signal has no entry price yet (fresh webhook signal an admin hasn't
 // completed) — never fabricated.
 function returnPct(s: LiveSignal): number | null {
   if (s.entry === null || !s.entry) return null;
-  const raw = ((s.price - s.entry) / s.entry) * 100;
+  const raw = ((referencePrice(s) - s.entry) / s.entry) * 100;
   return s.signal === "sell" ? -raw : raw;
 }
 
-// Has the live price crossed this target, in the trade's favorable
-// direction? null for "watch" signals (no direction to judge against).
-// Purely derived from the live quote already merged into LiveSignal —
-// nothing stored, so it's always accurate to what's live right now.
+// Has the (reference) price crossed this target, in the trade's favorable
+// direction? null for "watch" signals (no direction to judge against). Uses
+// referencePrice() so a closed trade's checkmarks stay consistent with its
+// frozen outcome instead of flickering with the live price afterward.
 function targetReached(s: LiveSignal, value: number): boolean | null {
-  if (s.signal === "buy") return s.price >= value;
-  if (s.signal === "sell") return s.price <= value;
+  const price = referencePrice(s);
+  if (s.signal === "buy") return price >= value;
+  if (s.signal === "sell") return price <= value;
   return null;
+}
+
+function ScoreCell({ score, hasResearch }: { score: ConvictionScore; hasResearch: boolean }) {
+  if (!hasResearch) {
+    return (
+      <span className="text-zinc-600" title="No research data cached yet for this symbol">
+        —
+      </span>
+    );
+  }
+  const tone = score.overall >= 70 ? "text-emerald-400" : score.overall >= 40 ? "text-amber-400" : "text-red-400";
+  return (
+    <span
+      className={`font-medium tabular-nums ${tone}`}
+      title={`Technical ${score.technical} · Analyst ${score.analyst} · Ownership ${score.ownership} — heuristic, not investment advice`}
+    >
+      {score.overall}
+    </span>
+  );
 }
 
 // Live-derived direction badge — flips from BUY/SELL to TARGET HIT/STOPPED
@@ -74,7 +108,7 @@ function TargetCell({ s, value }: { s: LiveSignal; value: number | null }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span className="tabular-nums text-zinc-300">{inr(value)}</span>
-      {reached && <span className="text-emerald-400" title="Live price has reached this target">✓</span>}
+      {reached && <span className="text-emerald-400" title="Price has reached this target">✓</span>}
     </span>
   );
 }
@@ -84,6 +118,10 @@ export default async function TrackRecordPage() {
   if (!userId) redirect("/login");
 
   const { signals, quotesOk } = await loadLiveSignals();
+  // Read-only, batched (one query, not N) — never triggers a live fetch, just
+  // whatever's already cached (see lib/stock-analytics-cache.ts). Powers the
+  // Score column below.
+  const stockMap = await getCachedStockDetailsBatch(signals.map((s) => s.symbol));
 
   const returns = signals.map(returnPct).filter((v): v is number => v !== null);
   const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : null;
@@ -119,9 +157,11 @@ export default async function TrackRecordPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
             This tracks exactly what&rsquo;s live in the signal feed right now — nothing suppressed,
-            nothing closed out and dropped, nothing added separately. Return % is each symbol&rsquo;s
-            live price against the entry price it was posted at, since the day it was generated.
-            Not every signal performs as expected — that&rsquo;s the point of showing it unfiltered.
+            nothing closed out and dropped, nothing added separately. Return % is live price vs
+            entry while a trade is open, and the actual stop/target exit price vs entry once it&rsquo;s
+            closed — never the live price after the fact, since that keeps drifting once the trade
+            is already over. Not every signal performs as expected — that&rsquo;s the point of
+            showing it unfiltered.
           </p>
           {!quotesOk && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
@@ -146,7 +186,7 @@ export default async function TrackRecordPage() {
               className={`rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 ${
                 avgReturn >= 0 ? "text-emerald-400" : "text-red-400"
               }`}
-              title="Live price vs entry price, across every signal that has an entry price set."
+              title="Live price vs entry while open, exit price vs entry once closed — across every signal that has an entry price set."
             >
               {avgReturn >= 0 ? "+" : ""}
               {avgReturn.toFixed(1)}% avg return ({returns.length} of {signals.length})
@@ -155,7 +195,7 @@ export default async function TrackRecordPage() {
         </div>
 
         <section className="overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
             <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
                 <th className="px-3 py-2.5">Symbol</th>
@@ -166,21 +206,26 @@ export default async function TrackRecordPage() {
                 <th className="px-3 py-2.5">T2</th>
                 <th className="px-3 py-2.5">T3</th>
                 <th className="px-3 py-2.5">Stop</th>
-                <th className="px-3 py-2.5">Live</th>
+                <th className="px-3 py-2.5">Live / Exit</th>
                 <th className="px-3 py-2.5">Return</th>
                 <th className="px-3 py-2.5">Days</th>
+                <th className="px-3 py-2.5">Score</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {signals.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-8 text-center text-zinc-500">
+                  <td colSpan={12} className="px-3 py-8 text-center text-zinc-500">
                     No live signals right now.
                   </td>
                 </tr>
               )}
               {signals.map((s) => {
                 const ret = returnPct(s);
+                const closed = s.outcome === "stopped" || s.outcome === "target_hit";
+                const stockDetails = stockMap.get(s.symbol) ?? null;
+                const hasResearch = stockDetails !== null;
+                const score = convictionScore(s, stockDetails);
                 return (
                   <tr key={s.symbol} className="bg-zinc-950">
                     <td className="px-3 py-2.5">
@@ -214,14 +259,26 @@ export default async function TrackRecordPage() {
                         <span className="inline-flex items-center gap-1">
                           <span className="tabular-nums text-zinc-300">{inr(s.stop)}</span>
                           {s.outcome === "stopped" && (
-                            <span className="text-amber-400" title="Live price has hit the stop">✕</span>
+                            <span className="text-amber-400" title="Price hit the stop">✕</span>
                           )}
                         </span>
                       ) : (
                         <span className="text-zinc-600">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 tabular-nums text-zinc-300">{inr(s.price)}</td>
+                    <td className="px-3 py-2.5 tabular-nums text-zinc-300">
+                      {closed ? (
+                        s.exitPrice !== null ? (
+                          <span title="Trade closed — this is the exit price, not a live quote">
+                            {inr(s.exitPrice)}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">—</span>
+                        )
+                      ) : (
+                        inr(s.price)
+                      )}
+                    </td>
                     <td
                       className={`px-3 py-2.5 font-medium tabular-nums ${
                         ret === null ? "text-zinc-600" : ret >= 0 ? "text-emerald-400" : "text-red-400"
@@ -230,6 +287,9 @@ export default async function TrackRecordPage() {
                       {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-400">{daysSince(s.generatedAt)}</td>
+                    <td className="px-3 py-2.5">
+                      <ScoreCell score={score} hasResearch={hasResearch} />
+                    </td>
                   </tr>
                 );
               })}

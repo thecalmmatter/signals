@@ -159,6 +159,26 @@ export async function getOrPopulateStockDetails(
   return { stock: null, error: STOCK_ANALYTICS_POPULATING_MESSAGE };
 }
 
+/** Batch read for the track-record table's Score column — one query for all
+ * currently-active symbols instead of N+1 lookups. Read-only, same as
+ * getCachedStockDetails: never triggers a live fetch, just returns whatever
+ * (if anything) is already cached. Missing symbols simply aren't in the map. */
+export async function getCachedStockDetailsBatch(symbols: string[]): Promise<Map<string, StockDetails | null>> {
+  const result = new Map<string, StockDetails | null>();
+  if (symbols.length === 0) return result;
+  try {
+    const { rows } = await getPool().query(`SELECT symbol, data FROM stock_analytics_cache WHERE symbol = ANY($1)`, [
+      symbols,
+    ]);
+    for (const row of rows) {
+      result.set(row.symbol as string, (row.data as StockDetails | null) ?? null);
+    }
+  } catch (error) {
+    console.error(`getCachedStockDetailsBatch failed (${MIGRATION_HINT})`, error);
+  }
+  return result;
+}
+
 /** Status list for the admin panel — one row per currently-active symbol,
  * joined against whatever's cached (or nothing, if never attempted). */
 export async function listStockAnalyticsStatus(): Promise<StockAnalyticsStatus[]> {

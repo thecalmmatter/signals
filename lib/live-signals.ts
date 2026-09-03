@@ -84,6 +84,14 @@ export type LiveSignal = {
   stop: number | null;
   /** Live-derived — see computeOutcome(). Not stored, always fresh. */
   outcome: SignalOutcome;
+  /** Price frozen at the exact moment outcome was locked (stopped/target_hit)
+   *  — see outcome_exit_price in the sticky-lock migration. null while the
+   *  trade is still open, or if this environment predates that migration
+   *  (exitPriceSupported tier). Callers should prefer this over `price` once
+   *  a trade has closed — `price` keeps drifting with the live quote, which
+   *  is exactly the wrong number for a return % or "what did it actually
+   *  exit at" display once the trade is over. */
+  exitPrice: number | null;
   daysIn: number;
   daysToExit: number;
   /** When this symbol's active signal was first generated (ISO). */
@@ -214,23 +222,33 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
 
     const locked = r.outcome_locked as "target_hit" | "stopped" | null | undefined;
     let outcome: SignalOutcome;
+    // Price frozen at the moment the trade actually closed — see the
+    // `exitPrice` field doc comment on LiveSignal. null while still open.
+    let exitPrice: number | null = null;
     if (locked === "stopped" || locked === "target_hit") {
       // Already locked from a previous call — stays put regardless of what
       // the current live price says, until an admin edits the signal.
       outcome = locked;
+      // Fallback to the current live price only covers rows locked before
+      // outcome_exit_price existed (migration_telegram_digest.sql) — every
+      // row locked after that migration always has this column populated.
+      exitPrice = numOrNull(r.outcome_exit_price) ?? price;
     } else {
       const live = computeOutcome(signalType, price, [target, target2, target3], stop);
       outcome = live;
-      if (lockSupported && (live === "stopped" || live === "target_hit")) {
-        newlyLocked.push({
-          id: r.id as string,
-          outcome: live,
-          symbol: r.symbol as string,
-          signal: signalType,
-          entry: numOrNull(r.entry_price),
-          exitPrice: price,
-          daysIn: Number(r.days_in) || 0,
-        });
+      if (live === "stopped" || live === "target_hit") {
+        exitPrice = price; // freezing right now, in this exact call
+        if (lockSupported) {
+          newlyLocked.push({
+            id: r.id as string,
+            outcome: live,
+            symbol: r.symbol as string,
+            signal: signalType,
+            entry: numOrNull(r.entry_price),
+            exitPrice: price,
+            daysIn: Number(r.days_in) || 0,
+          });
+        }
       }
     }
 
@@ -247,6 +265,7 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       target3,
       stop,
       outcome,
+      exitPrice,
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,
       generatedAt: new Date(r.generated_at as string).toISOString(),

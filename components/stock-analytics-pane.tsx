@@ -13,8 +13,9 @@ import { useRouter } from "next/navigation";
 import { LandingParticleCanvas } from "./landing-particle-canvas";
 import { stockViewTransitionName } from "./symbol-link";
 import type { LiveSignal } from "@/lib/live-signals";
-import type { StockDetails, RecosBar, ShareholdingCategory, CorporateActionData } from "@/lib/indian-stock-api";
+import type { StockDetails, CorporateActionData } from "@/lib/indian-stock-api";
 import { STOCK_ANALYTICS_POPULATING_MESSAGE } from "@/lib/stock-analytics-messages";
+import { convictionScore, recoCounts, latestShareholdingPct } from "@/lib/conviction-score";
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
 
@@ -22,24 +23,6 @@ function returnPct(signal: LiveSignal): number | null {
   if (!signal.entry || signal.entry <= 0) return null;
   const raw = ((signal.price - signal.entry) / signal.entry) * 100;
   return signal.signal === "sell" ? -raw : raw;
-}
-
-function recoCounts(recosBar: RecosBar): { buy: number; hold: number; sell: number } {
-  const rows = recosBar?.stockAnalyst ?? [];
-  const find = (name: string) => rows.find((r) => r.ratingName === name)?.numberOfAnalysts ?? 0;
-  return {
-    buy: find("Strong Buy") + find("Buy"),
-    hold: find("Hold"),
-    sell: find("Sell") + find("Strong Sell"),
-  };
-}
-
-function latestShareholdingPct(shareholding: ShareholdingCategory[] | null, displayName: string): number | null {
-  const row = shareholding?.find((s) => s.displayName === displayName);
-  const last = row?.categories[row.categories.length - 1];
-  if (!last) return null;
-  const v = Number(last.percentage);
-  return Number.isFinite(v) ? v : null;
 }
 
 type FlatAction = { label: string; date: string; remarks: string };
@@ -60,22 +43,6 @@ function flattenCorporateActions(data: CorporateActionData): FlatAction[] {
   push("Split", data.splits);
   push("AGM", data.annualGeneralMeeting);
   return out.filter((a) => a.date).sort((a, b) => b.date.localeCompare(a.date));
-}
-
-// First-pass heuristic composite, 0-100. Deliberately simple and openly
-// approximate.
-function convictionScore(signal: LiveSignal | null, stock: StockDetails | null) {
-  const technical = !signal ? 50 : signal.outcome === "target_hit" ? 90 : signal.outcome === "stopped" ? 20 : 65;
-
-  const { buy, hold, sell } = recoCounts(stock?.recosBar ?? null);
-  const totalRecos = buy + sell + hold;
-  const analyst = totalRecos > 0 ? Math.round(((buy + hold * 0.5) / totalRecos) * 100) : 50;
-
-  const promoterPct = latestShareholdingPct(stock?.shareholding ?? null, "Promoter");
-  const ownership = promoterPct === null ? 50 : promoterPct >= 50 ? 70 : promoterPct >= 25 ? 55 : 40;
-
-  const overall = Math.round(technical * 0.4 + analyst * 0.35 + ownership * 0.25);
-  return { overall, technical, analyst, ownership };
 }
 
 export function StockAnalyticsPane({
