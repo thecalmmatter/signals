@@ -271,13 +271,16 @@ export default async function TrackRecordPage() {
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-300">
                       {closed ? (
-                        s.exitPrice !== null ? (
-                          <span title="Trade closed — this is the exit price, not a live quote">
-                            {inr(s.exitPrice)}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )
+                        <span
+                          className="text-zinc-500"
+                          title={
+                            s.exitPrice !== null
+                              ? `Closed at ${inr(s.exitPrice)} — the actual stop/target exit price, not a live quote`
+                              : "Trade closed"
+                          }
+                        >
+                          Closed
+                        </span>
                       ) : (
                         inr(s.price)
                       )}
