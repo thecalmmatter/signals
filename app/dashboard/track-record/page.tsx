@@ -199,6 +199,7 @@ export default async function TrackRecordPage() {
             <thead className="border-b border-zinc-800 bg-zinc-900/60 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
                 <th className="px-3 py-2.5">Symbol</th>
+                <th className="px-3 py-2.5">Score</th>
                 <th className="px-3 py-2.5">Dir</th>
                 <th className="px-3 py-2.5">Since</th>
                 <th className="px-3 py-2.5">Entry</th>
@@ -209,7 +210,6 @@ export default async function TrackRecordPage() {
                 <th className="px-3 py-2.5">Live / Exit</th>
                 <th className="px-3 py-2.5">Return</th>
                 <th className="px-3 py-2.5">Days</th>
-                <th className="px-3 py-2.5">Score</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
@@ -235,6 +235,9 @@ export default async function TrackRecordPage() {
                       >
                         {s.symbol}
                       </SymbolLink>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <ScoreCell score={score} hasResearch={hasResearch} />
                     </td>
                     <td className="px-3 py-2.5">
                       <DirBadge s={s} />
@@ -287,9 +290,6 @@ export default async function TrackRecordPage() {
                       {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-400">{daysSince(s.generatedAt)}</td>
-                    <td className="px-3 py-2.5">
-                      <ScoreCell score={score} hasResearch={hasResearch} />
-                    </td>
                   </tr>
                 );
               })}
