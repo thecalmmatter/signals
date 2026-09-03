@@ -229,10 +229,18 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       // Already locked from a previous call — stays put regardless of what
       // the current live price says, until an admin edits the signal.
       outcome = locked;
-      // Fallback to the current live price only covers rows locked before
-      // outcome_exit_price existed (migration_telegram_digest.sql) — every
-      // row locked after that migration always has this column populated.
-      exitPrice = numOrNull(r.outcome_exit_price) ?? price;
+      // BUG FIX (verified against real Fyers OHLC — MCX crossed its ₹3,328
+      // target on 2026-08-26, a genuine ~10.4% move, but was showing +5.7%
+      // because this fallback used to be `?? price`): rows locked before
+      // outcome_exit_price existed (migration_telegram_digest.sql), or any
+      // other row that somehow still has it NULL, were falling back to
+      // *today's live price* — so a "closed" trade's return kept drifting
+      // with the market every single day instead of staying frozen at the
+      // level that actually closed it. The stop/target price that defined
+      // the close is the correct fallback, not a live quote taken well after
+      // the fact. See scripts/migration_backfill_outcome_exit_price.sql for
+      // the one-time DB backfill; this stays as a defensive fallback only.
+      exitPrice = numOrNull(r.outcome_exit_price) ?? (locked === "stopped" ? stop : target) ?? price;
     } else {
       const live = computeOutcome(signalType, price, [target, target2, target3], stop);
       outcome = live;

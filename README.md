@@ -66,6 +66,7 @@ psql "$DATABASE_URL" -f scripts/migration_telegram_leads.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_snapshot_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_stock_analytics_cache.sql
+psql "$DATABASE_URL" -f scripts/migration_backfill_outcome_exit_price.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -323,6 +324,16 @@ a notification per close.
   (the price frozen at the moment a signal locked, so a digest's return %
   doesn't keep drifting with the live quote after the trade is actually
   over) and a single-row `telegram_digest_state` table (`last_posted_at`).
+- **Bug fixed + backfilled (2026-09-03):** rows locked *before* this column
+  existed (or that otherwise ended up with it NULL) were falling back to
+  *today's live price* as the exit price everywhere it's read (track record
+  page, stock analytics pane, this digest) — so a "closed" trade's return
+  kept silently drifting with the market instead of staying frozen. Verified
+  against real Fyers OHLC: MCX crossed its ₹3,328 target on 2026-08-26 (a
+  genuine ~+10.4% move) but was displaying +5.7%, using that day's live
+  price instead. Fixed in `lib/live-signals.ts` (fallback is now the
+  target/stop price that actually closed the trade, not a live quote) and
+  backfilled existing rows with `scripts/migration_backfill_outcome_exit_price.sql`.
 - Triggered by the `crons` entry in `vercel.json` hitting
   `/api/cron/telegram-digest` — **once a day on Vercel's Hobby plan**
   (Hobby caps cron frequency at daily; Pro allows finer schedules by editing
