@@ -40,9 +40,13 @@ export type SignalOutcome = "open" | "target_hit" | "stopped";
  * play. Hitting an earlier target along the way still lights up that
  * target's own checkmark (see targetReached() on the track record page) —
  * this only gates the overall open/closed status, not the per-target marks.
- * Stop crossed (unfavorable direction) → "stopped", regardless of how many
- * targets were hit first — once the trade is stopped out it's done, full
- * stop, no partial-target exception.
+ * Stop crossed (unfavorable direction) → "stopped" — if SL is touched at
+ * any point, that's it, done, regardless of whether price has since
+ * recovered or how many targets were hit first. That's why this checks the
+ * day's LOW/HIGH (see dayLow/dayHigh params), not just the current tick: a
+ * stop that was briefly dipped into and bounced back from between two price
+ * polls is still a stop that happened, not something that gets to un-happen
+ * because the next poll caught a better price.
  * Neither, or a "watch" signal with no direction to judge against → "open".
  * If both a target and the stop are technically crossed (shouldn't happen
  * for a sane setup, but live prices are messy), stop takes precedence —
@@ -50,7 +54,9 @@ export type SignalOutcome = "open" | "target_hit" | "stopped";
  */
 export function computeOutcome(
   signalType: "buy" | "sell" | "watch",
-  price: number,
+  ltp: number,
+  dayLow: number,
+  dayHigh: number,
   targets: (number | null)[],
   stop: number | null
 ): SignalOutcome {
@@ -62,16 +68,19 @@ export function computeOutcome(
   // every SELL read as "target_hit" (0 <= any positive target) whenever
   // Fyers quotes were briefly unavailable — the whole ticker's DIR badges
   // would flip incorrectly. Bail to "open" instead of guessing.
-  if (!(price > 0)) return "open";
+  if (!(ltp > 0)) return "open";
   const set = targets.filter((t): t is number => t !== null && t > 0);
   if (signalType === "buy") {
-    if (stop && stop > 0 && price <= stop) return "stopped";
+    // Day's low, not the current tick — see doc comment above.
+    if (stop && stop > 0 && dayLow <= stop) return "stopped";
     // Furthest target = highest price for a buy (T3 > T2 > T1 by design).
-    if (set.length > 0 && price >= Math.max(...set)) return "target_hit";
+    // Day's high, same reasoning: a spike through target between polls
+    // still counts as the target having been reached.
+    if (set.length > 0 && dayHigh >= Math.max(...set)) return "target_hit";
   } else {
-    if (stop && stop > 0 && price >= stop) return "stopped";
+    if (stop && stop > 0 && dayHigh >= stop) return "stopped";
     // Furthest target = lowest price for a sell.
-    if (set.length > 0 && price <= Math.min(...set)) return "target_hit";
+    if (set.length > 0 && dayLow <= Math.min(...set)) return "target_hit";
   }
   return "open";
 }
@@ -261,6 +270,12 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
   const signals: LiveSignal[] = rows.map((r) => {
     const quote = quotes.get(r.symbol as string);
     const price = quote ? quote.ltp : Number(r.price) || 0;
+    // Day's high/low so far, for intraday-touch stop/target detection (see
+    // computeOutcome()) — fall back to the current tick if no live quote at
+    // all (stale stored price, Fyers down), same graceful degradation as
+    // `price` above.
+    const dayLow = quote ? quote.low : price;
+    const dayHigh = quote ? quote.high : price;
     const changePct = quote && quote.prevClose ? ((quote.ltp - quote.prevClose) / quote.prevClose) * 100 : 0;
     const change = quote ? quote.ltp - quote.prevClose : 0;
     const signalType = r.signal_type as "buy" | "sell" | "watch";
@@ -291,10 +306,22 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       // the one-time DB backfill; this stays as a defensive fallback only.
       exitPrice = numOrNull(r.outcome_exit_price) ?? (locked === "stopped" ? stop : target) ?? price;
     } else {
-      const live = computeOutcome(signalType, price, [target, target2, target3], stop);
+      const live = computeOutcome(signalType, price, dayLow, dayHigh, [target, target2, target3], stop);
       outcome = live;
       if (live === "stopped" || live === "target_hit") {
-        exitPrice = price; // freezing right now, in this exact call
+        // Detection is via the day's high/low (see computeOutcome), so the
+        // exact tick price at the moment of the actual touch isn't known —
+        // by the time this poll runs, price may already have moved on. The
+        // defined stop/target level itself is the honest number to freeze:
+        // it's the level we know for a fact was reached, not a guess at
+        // what the live price happens to be right now.
+        const setVals = [target, target2, target3].filter((t): t is number => t !== null && t > 0);
+        exitPrice =
+          live === "stopped"
+            ? (stop as number)
+            : signalType === "buy"
+              ? Math.max(...setVals)
+              : Math.min(...setVals);
         if (lockSupported) {
           newlyLocked.push({
             id: r.id as string,
@@ -302,7 +329,7 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
             symbol: r.symbol as string,
             signal: signalType,
             entry: numOrNull(r.entry_price),
-            exitPrice: price,
+            exitPrice,
             daysIn: Number(r.days_in) || 0,
           });
         }
@@ -323,9 +350,12 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     // played out. Only the persisted flags matter once a trade is closed.
     const alreadyClosed = locked === "stopped" || locked === "target_hit";
     const isFavorable = (level: number | null): boolean => {
-      if (alreadyClosed || level === null || level <= 0 || !(price > 0)) return false;
-      if (signalType === "buy") return price >= level;
-      if (signalType === "sell") return price <= level;
+      if (alreadyClosed || level === null || level <= 0) return false;
+      // Day's high/low, not the current tick — same intraday-touch reasoning
+      // as computeOutcome() above: a target briefly spiked through between
+      // two polls still counts as reached.
+      if (signalType === "buy") return dayHigh >= level;
+      if (signalType === "sell") return dayLow <= level;
       return false;
     };
     const priorT1Hit = Boolean(r.target_1_hit_at);

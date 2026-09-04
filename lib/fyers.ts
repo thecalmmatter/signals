@@ -97,7 +97,19 @@ export async function getCandles(
   }));
 }
 
-export type Quote = { ltp: number; prevClose: number };
+export type Quote = {
+  ltp: number;
+  prevClose: number;
+  /** Day's high/low so far, from Fyers' running intraday OHLC — NOT just
+   *  "the price at the moment of this poll." Used by lib/live-signals.ts to
+   *  detect a stop/target that was briefly touched and recovered from
+   *  between two polls: checking only the latest `ltp` on a ~10-20s poll
+   *  cycle can miss a real intraday wick entirely. Falls back to `ltp` if
+   *  Fyers doesn't return these for some reason (pre-market, etc.) — see
+   *  the parsing below. */
+  high: number;
+  low: number;
+};
 
 /**
  * Live last-traded-price + previous close for a batch of symbols, keyed by
@@ -130,7 +142,10 @@ export async function getQuotes(symbols: string[]): Promise<Map<string, Quote>> 
 
   const data = (await res.json()) as {
     s?: string;
-    d?: { n?: string; v?: { lp?: number; prev_close_price?: number } }[];
+    d?: {
+      n?: string;
+      v?: { lp?: number; prev_close_price?: number; high_price?: number; low_price?: number };
+    }[];
     message?: string;
   };
 
@@ -147,8 +162,20 @@ export async function getQuotes(symbols: string[]): Promise<Map<string, Quote>> 
     const plain = byFyersSymbol.get(item.n) ?? item.n;
     const ltp = item.v?.lp;
     const prevClose = item.v?.prev_close_price;
+    const highPrice = item.v?.high_price;
+    const lowPrice = item.v?.low_price;
     if (typeof ltp === "number") {
-      out.set(plain, { ltp, prevClose: typeof prevClose === "number" ? prevClose : ltp });
+      out.set(plain, {
+        ltp,
+        prevClose: typeof prevClose === "number" ? prevClose : ltp,
+        // Fall back to ltp if Fyers doesn't return these (shouldn't normally
+        // happen once the market's open, but never let a missing field make
+        // the day-range narrower than reality — that would silently disable
+        // the intraday-touch stop/target detection in lib/live-signals.ts
+        // rather than just degrading to the old ltp-only behavior).
+        high: typeof highPrice === "number" && highPrice > 0 ? highPrice : ltp,
+        low: typeof lowPrice === "number" && lowPrice > 0 ? lowPrice : ltp,
+      });
     }
   }
 

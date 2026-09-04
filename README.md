@@ -70,6 +70,7 @@ psql "$DATABASE_URL" -f scripts/migration_backfill_outcome_exit_price.sql
 psql "$DATABASE_URL" -f scripts/migration_fix_partial_target_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_target_hit_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_target_hit_dates.sql
+psql "$DATABASE_URL" -f scripts/migration_backfill_intraday_stop_touches.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -481,6 +482,23 @@ shareholding, corporate actions, and recent news.
   this fix were backfilled against real Fyers OHLC by
   `scripts/migration_backfill_target_hit_dates.sql` (see that file for the
   audited per-symbol results).
+- **Bug fixed (2026-09-04): stop/target detection could miss a brief
+  intraday touch.** Product rule: if SL is touched at all — a dip that
+  recovers before the next price poll included — the trade is done, full
+  stop, no exception. But `computeOutcome()` only ever compared the *current*
+  live tick against the stop/target, on a ~10-20s poll cycle; a wick that
+  touched and bounced back between two polls was invisible to it. Fixed by
+  using Fyers' running intraday day-high/day-low (`lib/fyers.ts` `Quote.high`/
+  `Quote.low`) instead of just the latest tick, for both the overall
+  stop/target check and the per-target sticky-hit check. The audit that
+  found the original T1/T2/T3 bug also caught two live examples of exactly
+  this gap: `scripts/migration_backfill_intraday_stop_touches.sql` corrects
+  AKUMS (day low ₹748.35 vs stop ₹751 on 2026-09-04) and PNBHOUSING (day low
+  ₹1,125.4 vs stop ₹1,134 on 2026-09-02) — both genuinely stopped out days
+  before their pages showed it. See that file's header for two other
+  candidates that were checked and deliberately excluded (same-day-as-entry
+  ambiguity — a daily candle can't tell if a dip happened before or after
+  the entry trigger).
 - **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
   `lib/stock-analytics-cache.ts`): every page view used to call the Indian
   API live — slow on first load and wasteful against a rate-limited
