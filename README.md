@@ -68,6 +68,8 @@ psql "$DATABASE_URL" -f scripts/migration_telegram_snapshot_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_stock_analytics_cache.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_outcome_exit_price.sql
 psql "$DATABASE_URL" -f scripts/migration_fix_partial_target_lock.sql
+psql "$DATABASE_URL" -f scripts/migration_target_hit_lock.sql
+psql "$DATABASE_URL" -f scripts/migration_backfill_target_hit_dates.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -466,6 +468,19 @@ shareholding, corporate actions, and recent news.
   trade regardless of how many targets were hit first — that part was
   already correct. Existing rows locked prematurely on an intermediate
   target were reset back to `open` by `scripts/migration_fix_partial_target_lock.sql`.
+- **Bug fixed (2026-09-04): T1/T2/T3 checkmarks weren't sticky.** They were a
+  pure live-price comparison recomputed on every page load, so a target that
+  was genuinely reached and then retraced un-checked itself — wrong, a
+  target being hit is a fact that doesn't un-happen. `scripts/migration_target_hit_lock.sql`
+  adds `signals.target_1_hit_at`/`target_2_hit_at`/`target_3_hit_at`, set
+  automatically the first time price crosses each level (same sticky
+  read/write pattern as `outcome_locked`, in `lib/live-signals.ts`) and
+  cleared only when an admin edits the signal's targets. The track record
+  page now reads these flags directly instead of re-deriving them from live
+  price. Existing open signals that had already crossed a target before
+  this fix were backfilled against real Fyers OHLC by
+  `scripts/migration_backfill_target_hit_dates.sql` (see that file for the
+  audited per-symbol results).
 - **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
   `lib/stock-analytics-cache.ts`): every page view used to call the Indian
   API live — slow on first load and wasteful against a rate-limited

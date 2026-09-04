@@ -93,6 +93,19 @@ export type LiveSignal = {
   stop: number | null;
   /** Live-derived — see computeOutcome(). Not stored, always fresh. */
   outcome: SignalOutcome;
+  /** Sticky, per-target "was this level ever reached" flags — see
+   *  signals.target_1_hit_at / target_2_hit_at / target_3_hit_at
+   *  (scripts/migration_target_hit_lock.sql). Once true, stays true even if
+   *  price later retraces past the target — a target that was genuinely hit
+   *  doesn't un-happen just because price pulled back. Independent of
+   *  `outcome`: T1 can be true while the trade is still `open` (T2/T3 still
+   *  ahead of it), or while it's later `stopped` (the target was hit before
+   *  the reversal, that's still a fact). Defaults to a live comparison
+   *  (price vs target right now) if this environment predates the
+   *  migration — see targetHitSupported handling in loadLiveSignals(). */
+  target1Hit: boolean;
+  target2Hit: boolean;
+  target3Hit: boolean;
   /** Price frozen at the exact moment outcome was locked (stopped/target_hit)
    *  — see outcome_exit_price in the sticky-lock migration. null while the
    *  trade is still open, or if this environment predates that migration
@@ -134,15 +147,35 @@ const BASE_COLUMNS =
   "stop_price, days_in, days_to_exit, status, generated_at, updated_at";
 
 async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
-  // Three tiers, each degrading gracefully rather than taking the whole
+  // Four tiers, each degrading gracefully rather than taking the whole
   // ticker down:
-  //  1. Full — outcome_locked/outcome_locked_at (migration_signal_outcome_lock.sql)
-  //     AND outcome_exit_price (migration_telegram_digest.sql) both applied.
+  //  0. Full — everything below, plus target_1_hit_at/target_2_hit_at/
+  //     target_3_hit_at (migration_target_hit_lock.sql) for sticky per-target
+  //     checkmarks.
+  //  1. outcome_locked/outcome_locked_at (migration_signal_outcome_lock.sql)
+  //     AND outcome_exit_price (migration_telegram_digest.sql) applied, but
+  //     not the per-target hit columns yet.
   //  2. Lock only — outcome_locked/outcome_locked_at applied, but the newer
   //     outcome_exit_price migration hasn't run yet on this environment.
   //     Sticky lock still works; the exit price just won't be frozen for the
   //     digest feature until the migration runs.
   //  3. Neither — sticky lock disabled entirely, outcome computed live only.
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (symbol)
+                ${BASE_COLUMNS}, outcome_locked, outcome_locked_at, outcome_exit_price,
+                target_1_hit_at, target_2_hit_at, target_3_hit_at
+           FROM signals
+          WHERE status = 'active'
+          ORDER BY symbol, updated_at DESC
+       ) t
+       ORDER BY generated_at DESC, symbol`
+    );
+    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: true };
+  } catch {
+    // fall through to tier 1
+  }
   try {
     const { rows } = await pool.query(
       `SELECT * FROM (
@@ -154,7 +187,7 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
        ) t
        ORDER BY generated_at DESC, symbol`
     );
-    return { rows, lockSupported: true, exitPriceSupported: true };
+    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: false };
   } catch {
     // fall through to tier 2
   }
@@ -169,7 +202,7 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
        ) t
        ORDER BY generated_at DESC, symbol`
     );
-    return { rows, lockSupported: true, exitPriceSupported: false };
+    return { rows, lockSupported: true, exitPriceSupported: false, targetHitSupported: false };
   } catch (error) {
     console.error(
       "loadLiveSignals: outcome_locked columns missing — run scripts/migration_signal_outcome_lock.sql; sticky lock disabled for now",
@@ -185,13 +218,13 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
        ) t
        ORDER BY generated_at DESC, symbol`
     );
-    return { rows, lockSupported: false, exitPriceSupported: false };
+    return { rows, lockSupported: false, exitPriceSupported: false, targetHitSupported: false };
   }
 }
 
 export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
   const pool = getPool();
-  const { rows, lockSupported, exitPriceSupported } = await queryActiveSignals(pool);
+  const { rows, lockSupported, exitPriceSupported, targetHitSupported } = await queryActiveSignals(pool);
 
   let quotes = new Map<string, Quote>();
   let quotesOk = true;
@@ -217,6 +250,13 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     exitPrice: number;
     daysIn: number;
   }[] = [];
+
+  // Per-target sticky hits that just flipped true this call — persisted
+  // below (guarded by targetHitSupported) so a target that was reached and
+  // then retraced stays checked forever, instead of un-checking itself the
+  // moment price drops back below it. See target1Hit/target2Hit/target3Hit
+  // on LiveSignal.
+  const newlyTargetHit: { id: string; column: "target_1_hit_at" | "target_2_hit_at" | "target_3_hit_at" }[] = [];
 
   const signals: LiveSignal[] = rows.map((r) => {
     const quote = quotes.get(r.symbol as string);
@@ -269,6 +309,37 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       }
     }
 
+    // Sticky per-target hit flags — a level counts as "reached" if it was
+    // already persisted as hit before, OR if the current price has reached
+    // it favorably right now. Once true it's queued to persist (below) so
+    // every call after this one reads it straight from the DB instead of
+    // re-deriving it from a live price that may have since moved back.
+    //
+    // The live check only runs while the trade was ALREADY closed before
+    // this call (`locked` truthy coming in) skips it entirely — a trade
+    // that's already stopped/target_hit is done, and re-checking today's
+    // live price against a target days or weeks later could spuriously
+    // "discover" a hit that has nothing to do with how the trade actually
+    // played out. Only the persisted flags matter once a trade is closed.
+    const alreadyClosed = locked === "stopped" || locked === "target_hit";
+    const isFavorable = (level: number | null): boolean => {
+      if (alreadyClosed || level === null || level <= 0 || !(price > 0)) return false;
+      if (signalType === "buy") return price >= level;
+      if (signalType === "sell") return price <= level;
+      return false;
+    };
+    const priorT1Hit = Boolean(r.target_1_hit_at);
+    const priorT2Hit = Boolean(r.target_2_hit_at);
+    const priorT3Hit = Boolean(r.target_3_hit_at);
+    const target1Hit = priorT1Hit || isFavorable(target);
+    const target2Hit = priorT2Hit || isFavorable(target2);
+    const target3Hit = priorT3Hit || isFavorable(target3);
+    if (targetHitSupported) {
+      if (!priorT1Hit && target1Hit) newlyTargetHit.push({ id: r.id as string, column: "target_1_hit_at" });
+      if (!priorT2Hit && target2Hit) newlyTargetHit.push({ id: r.id as string, column: "target_2_hit_at" });
+      if (!priorT3Hit && target3Hit) newlyTargetHit.push({ id: r.id as string, column: "target_3_hit_at" });
+    }
+
     return {
       symbol: r.symbol as string,
       name: (r.name ?? r.symbol) as string,
@@ -283,11 +354,27 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
       stop,
       outcome,
       exitPrice,
+      target1Hit,
+      target2Hit,
+      target3Hit,
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,
       generatedAt: new Date(r.generated_at as string).toISOString(),
     };
   });
+
+  if (newlyTargetHit.length > 0) {
+    // Same per-row, guarded-by-IS-NULL pattern as the outcome lock below —
+    // concurrent pollers computing the same "just crossed" candidate is
+    // harmless, only one write actually lands.
+    for (const n of newlyTargetHit) {
+      try {
+        await pool.query(`UPDATE signals SET ${n.column} = now() WHERE id = $1 AND ${n.column} IS NULL`, [n.id]);
+      } catch (error) {
+        console.error("loadLiveSignals: failed to persist target hit lock", n.id, n.column, error);
+      }
+    }
+  }
 
   if (newlyLocked.length > 0) {
     // Actually-locked-by-this-call ids only — RETURNING id, not the input

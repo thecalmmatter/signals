@@ -38,17 +38,6 @@ function returnPct(s: LiveSignal): number | null {
   return s.signal === "sell" ? -raw : raw;
 }
 
-// Has the (reference) price crossed this target, in the trade's favorable
-// direction? null for "watch" signals (no direction to judge against). Uses
-// referencePrice() so a closed trade's checkmarks stay consistent with its
-// frozen outcome instead of flickering with the live price afterward.
-function targetReached(s: LiveSignal, value: number): boolean | null {
-  const price = referencePrice(s);
-  if (s.signal === "buy") return price >= value;
-  if (s.signal === "sell") return price <= value;
-  return null;
-}
-
 function ScoreCell({ score, hasResearch }: { score: ConvictionScore; hasResearch: boolean }) {
   if (!hasResearch) {
     return (
@@ -102,13 +91,21 @@ function DirBadge({ s }: { s: LiveSignal }) {
   );
 }
 
-function TargetCell({ s, value }: { s: LiveSignal; value: number | null }) {
+// `reached` comes straight from the sticky target1Hit/target2Hit/target3Hit
+// flags on LiveSignal (see lib/live-signals.ts) — once a target is hit it
+// stays checked forever, even if price later retraces below it. That's a
+// fact about the trade's history, not something a live quote should be able
+// to un-happen.
+function TargetCell({ value, reached }: { value: number | null; reached: boolean }) {
   if (!value) return <span className="text-zinc-600">—</span>;
-  const reached = targetReached(s, value);
   return (
     <span className="inline-flex items-center gap-1">
       <span className="tabular-nums text-zinc-300">{inr(value)}</span>
-      {reached && <span className="text-emerald-400" title="Price has reached this target">✓</span>}
+      {reached && (
+        <span className="text-emerald-400" title="Target reached — stays checked even if price pulls back">
+          ✓
+        </span>
+      )}
     </span>
   );
 }
@@ -249,13 +246,13 @@ export default async function TrackRecordPage() {
                       {s.entry ? inr(s.entry) : "—"}
                     </td>
                     <td className="px-3 py-2.5">
-                      <TargetCell s={s} value={s.target} />
+                      <TargetCell value={s.target} reached={s.target1Hit} />
                     </td>
                     <td className="px-3 py-2.5">
-                      <TargetCell s={s} value={s.target2} />
+                      <TargetCell value={s.target2} reached={s.target2Hit} />
                     </td>
                     <td className="px-3 py-2.5">
-                      <TargetCell s={s} value={s.target3} />
+                      <TargetCell value={s.target3} reached={s.target3Hit} />
                     </td>
                     <td className="px-3 py-2.5">
                       {s.stop ? (

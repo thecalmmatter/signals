@@ -109,6 +109,23 @@ export async function PATCH(
     );
   }
 
+  // Same reset for the sticky per-target hit flags (target_1/2/3_hit_at) —
+  // an admin changing target prices invalidates any previously-recorded
+  // "reached" history against the old levels. Separate best-effort query,
+  // same reasoning as above: scripts/migration_target_hit_lock.sql may not
+  // be applied on every environment yet, and this must never block the edit.
+  try {
+    await pool.query(
+      `UPDATE signals SET target_1_hit_at = NULL, target_2_hit_at = NULL, target_3_hit_at = NULL WHERE id = $1`,
+      [id]
+    );
+  } catch (error) {
+    console.error(
+      "PATCH /api/signals/[id]: failed to clear target hit locks (run scripts/migration_target_hit_lock.sql?)",
+      error
+    );
+  }
+
   // Manual actions: raw_payload is NULL (there is no webhook payload behind it).
   await pool.query(
     `INSERT INTO signal_events (signal_id, event_type, symbol, trigger_date, scan_name, detail, raw_payload)
