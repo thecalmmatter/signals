@@ -34,8 +34,15 @@ import { announceOutcome } from "./telegram-results";
 export type SignalOutcome = "open" | "target_hit" | "stopped";
 
 /**
- * Any of T1/T2/T3 hit (favorable direction) → "target_hit".
- * Stop crossed (unfavorable direction) → "stopped".
+ * The FURTHEST configured target hit (T3 if set, else T2, else T1) →
+ * "target_hit" — a trade with a T1/T2/T3 ladder is still genuinely running
+ * after only T1 prints; closing it there would hide that T2/T3 are still in
+ * play. Hitting an earlier target along the way still lights up that
+ * target's own checkmark (see targetReached() on the track record page) —
+ * this only gates the overall open/closed status, not the per-target marks.
+ * Stop crossed (unfavorable direction) → "stopped", regardless of how many
+ * targets were hit first — once the trade is stopped out it's done, full
+ * stop, no partial-target exception.
  * Neither, or a "watch" signal with no direction to judge against → "open".
  * If both a target and the stop are technically crossed (shouldn't happen
  * for a sane setup, but live prices are messy), stop takes precedence —
@@ -59,10 +66,12 @@ export function computeOutcome(
   const set = targets.filter((t): t is number => t !== null && t > 0);
   if (signalType === "buy") {
     if (stop && stop > 0 && price <= stop) return "stopped";
-    if (set.some((t) => price >= t)) return "target_hit";
+    // Furthest target = highest price for a buy (T3 > T2 > T1 by design).
+    if (set.length > 0 && price >= Math.max(...set)) return "target_hit";
   } else {
     if (stop && stop > 0 && price >= stop) return "stopped";
-    if (set.some((t) => price <= t)) return "target_hit";
+    // Furthest target = lowest price for a sell.
+    if (set.length > 0 && price <= Math.min(...set)) return "target_hit";
   }
   return "open";
 }

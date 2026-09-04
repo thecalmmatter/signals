@@ -67,6 +67,7 @@ psql "$DATABASE_URL" -f scripts/migration_telegram_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_telegram_snapshot_digest.sql
 psql "$DATABASE_URL" -f scripts/migration_stock_analytics_cache.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_outcome_exit_price.sql
+psql "$DATABASE_URL" -f scripts/migration_fix_partial_target_lock.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -455,6 +456,16 @@ shareholding, corporate actions, and recent news.
   the same frozen reference price for closed trades (`referencePrice()` in
   `app/dashboard/track-record/page.tsx`), so a closed trade's numbers stop
   moving the instant it closes, exactly like a real trade book.
+- **Bug fixed (2026-09-04): partial target hit was closing the trade.**
+  `computeOutcome()` used to lock as `target_hit` (→ shown as "Closed") the
+  moment *any* configured target hit — so a T1/T2/T3 ladder that only
+  cleared T1 got marked closed even though T2/T3 were still ahead of it.
+  Now it only closes on the *furthest* configured target (T3 if set, else
+  T2, else T1); an earlier target still lights up its own checkmark on the
+  track record page, it just doesn't end the trade. A stop always closes the
+  trade regardless of how many targets were hit first — that part was
+  already correct. Existing rows locked prematurely on an intermediate
+  target were reset back to `open` by `scripts/migration_fix_partial_target_lock.sql`.
 - **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
   `lib/stock-analytics-cache.ts`): every page view used to call the Indian
   API live — slow on first load and wasteful against a rate-limited
