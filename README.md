@@ -71,6 +71,7 @@ psql "$DATABASE_URL" -f scripts/migration_fix_partial_target_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_target_hit_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_target_hit_dates.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_intraday_stop_touches.sql
+psql "$DATABASE_URL" -f scripts/migration_unlock_hblengine_false_stop.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -499,6 +500,21 @@ shareholding, corporate actions, and recent news.
   candidates that were checked and deliberately excluded (same-day-as-entry
   ambiguity — a daily candle can't tell if a dip happened before or after
   the entry trigger).
+- **Bug fixed (2026-09-04, caught live within minutes): the day-low/day-high
+  fix above had a same-day blind spot.** Fyers' day range is cumulative
+  since market open, not since a specific trade's entry — for a signal
+  generated earlier in *today's* session, that range can include price
+  action from before the entry ever triggered. HBLENGINE dipped to ₹667
+  before its buy signal fired at ₹701, and the day-low check wrongly locked
+  it "stopped" against its ₹676 stop off a price the trade was never
+  actually exposed to. Fixed with an `enteredToday` guard in
+  `loadLiveSignals()`: a signal from a prior day still gets the full
+  day-range check (safe — the whole trading day happened after entry); a
+  signal from today falls back to the plain current-tick comparison instead
+  (accepting a smaller risk of missing a same-day wick between polls, over
+  the much worse risk of closing a trade off pre-entry price action).
+  `scripts/migration_unlock_hblengine_false_stop.sql` clears the bad lock
+  this produced — run it before the other pending migrations.
 - **Data pipeline / cache** (`scripts/migration_stock_analytics_cache.sql`,
   `lib/stock-analytics-cache.ts`): every page view used to call the Indian
   API live — slow on first load and wasteful against a rate-limited

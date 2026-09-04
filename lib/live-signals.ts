@@ -17,6 +17,21 @@ import { getPool } from "./db";
 import { getQuotes, type Quote } from "./fyers";
 import { announceOutcome } from "./telegram-results";
 
+// Calendar date in IST (Asia/Kolkata), formatted YYYY-MM-DD — used to tell
+// whether a signal was generated earlier in today's session (see the
+// enteredToday check in loadLiveSignals()). A naive UTC date comparison is
+// wrong for IST, same reasoning as istDateNow() in the chartlink webhook.
+function istDateStr(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 /**
  * Live, price-derived outcome. This is what powers the DIR badge flipping
  * from "BUY" to "TARGET HIT"/"STOPPED" automatically once price crosses one
@@ -274,8 +289,25 @@ export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotes
     // computeOutcome()) — fall back to the current tick if no live quote at
     // all (stale stored price, Fyers down), same graceful degradation as
     // `price` above.
-    const dayLow = quote ? quote.low : price;
-    const dayHigh = quote ? quote.high : price;
+    //
+    // BUG FIX (caught live in production, 2026-09-04): Fyers' day-low/high
+    // is cumulative since market open, not since this specific trade's
+    // entry. For a signal generated earlier THIS SAME session, that range
+    // can include price action from *before* the entry ever triggered —
+    // HBLENGINE dipped to ₹667 pre-entry, then the buy signal fired at
+    // ₹701; using the day's low against its ₹676 stop wrongly locked it
+    // "stopped" off a low the trade was never actually exposed to. A
+    // signal from a prior day doesn't have this problem — its entire
+    // trading day happened after entry, so the day range is safe to use.
+    // For a same-day signal we don't have a cheap way to know "the low
+    // since entry" (Fyers quotes only give since-market-open), so this
+    // falls back to the old exact-tick comparison for today's signals —
+    // accepting the smaller risk of missing a same-day wick between polls
+    // over the much worse risk of closing a trade off pre-entry price
+    // action it was never exposed to.
+    const enteredToday = istDateStr(new Date(r.generated_at as string)) === istDateStr(new Date());
+    const dayLow = quote ? (enteredToday ? price : quote.low) : price;
+    const dayHigh = quote ? (enteredToday ? price : quote.high) : price;
     const changePct = quote && quote.prevClose ? ((quote.ltp - quote.prevClose) / quote.prevClose) * 100 : 0;
     const change = quote ? quote.ltp - quote.prevClose : 0;
     const signalType = r.signal_type as "buy" | "sell" | "watch";
