@@ -2,10 +2,20 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
+import { getDefaultTenant, getTenantByWebhookToken, type Tenant } from "@/lib/tenants";
 
 // Chartlink webhook ingestion. PUBLIC by design — proxy.ts does NOT gate this
 // path (Chartlink cannot authenticate via Clerk). Auth = shared secret token in
 // the URL:  /api/webhooks/chartlink?token=<CHARTLINK_WEBHOOK_TOKEN>
+//
+// Multi-tenancy, phase 1 (see scripts/migration_tenants.sql): the token now
+// resolves a tenant one of two ways —
+//   1. It matches a row in tenants.chartlink_webhook_token (a reseller's own
+//      token, once one is issued).
+//   2. It matches the legacy CHARTLINK_WEBHOOK_TOKEN env var, in which case
+//      this alert belongs to the seeded 'default' tenant — this is the path
+//      every existing Chartlink alert takes today, unchanged.
+// An unrecognized token is rejected exactly as before either way.
 //
 // Confirmed payload shape (one POST carries many stocks):
 // {
@@ -114,6 +124,7 @@ async function lookupSignalType(scanUrl: string): Promise<"buy" | "sell" | null>
 }
 
 async function upsertSignal(params: {
+  tenantId: number;
   symbol: string;
   signalType: "buy" | "sell";
   price: number;
@@ -123,7 +134,7 @@ async function upsertSignal(params: {
   scannedAtIst: string | null;
   rawPayload: Record<string, unknown>;
 }): Promise<void> {
-  const { symbol, signalType, price, triggerDate, scanUrl, scanName, scannedAtIst, rawPayload } = params;
+  const { tenantId, symbol, signalType, price, triggerDate, scanUrl, scanName, scannedAtIst, rawPayload } = params;
   const pool = getPool();
   const client = await pool.connect();
   try {
@@ -131,9 +142,9 @@ async function upsertSignal(params: {
 
     const existing = await client.query<{ id: number; status: string }>(
       `SELECT id, status FROM signals
-        WHERE symbol = $1 AND trigger_date = $2 AND scan_url = $3
+        WHERE tenant_id = $1 AND symbol = $2 AND trigger_date = $3 AND scan_url = $4
         FOR UPDATE`,
-      [symbol, triggerDate, scanUrl]
+      [tenantId, symbol, triggerDate, scanUrl]
     );
     const row = existing.rows[0];
 
@@ -157,10 +168,10 @@ async function upsertSignal(params: {
 
     const inserted = await client.query<{ id: number }>(
       `INSERT INTO signals
-         (symbol, name, signal_type, price, status, trigger_date, scan_url, scan_name,
+         (tenant_id, symbol, name, signal_type, price, status, trigger_date, scan_url, scan_name,
           triggered_at_ist, raw_payload, generated_at, updated_at, days_in)
-       VALUES ($1, $1, $2, $3, 'active', $4, $5, $6, $7, $8, now(), now(), 0)
-       ON CONFLICT (symbol, trigger_date, scan_url) DO UPDATE SET
+       VALUES ($1, $2, $2, $3, $4, 'active', $5, $6, $7, $8, $9, now(), now(), 0)
+       ON CONFLICT (tenant_id, symbol, trigger_date, scan_url) DO UPDATE SET
          signal_type      = EXCLUDED.signal_type,
          price            = EXCLUDED.price,
          scan_name        = EXCLUDED.scan_name,
@@ -168,7 +179,7 @@ async function upsertSignal(params: {
          raw_payload      = EXCLUDED.raw_payload,
          updated_at       = now()
        RETURNING id`,
-      [symbol, signalType, price, triggerDate, scanUrl, scanName, scannedAtIst, rawPayload]
+      [tenantId, symbol, signalType, price, triggerDate, scanUrl, scanName, scannedAtIst, rawPayload]
     );
     await client.query(
       `INSERT INTO signal_events (signal_id, event_type, symbol, trigger_date, scan_name, scan_url, detail, raw_payload)
@@ -190,13 +201,31 @@ async function upsertSignal(params: {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: Request) {
-  // 1) Token auth (query param) — the only auth Chartlink can do.
+  // 1) Token auth (query param) — the only auth Chartlink can do — now also
+  // resolves which tenant this alert belongs to (see this file's header
+  // comment and lib/tenants.ts). A token that matches neither a tenant's own
+  // webhook token nor the legacy env var is rejected exactly as before.
   const token = new URL(req.url).searchParams.get("token") ?? "";
-  if (!TOKEN) {
-    console.error("[chartlink] CHARTLINK_WEBHOOK_TOKEN is not set; rejecting all requests");
-    return json({ error: "webhook not configured" }, 500);
+  if (!token) {
+    return json({ error: "unauthorized" }, 401);
   }
-  if (token !== TOKEN) {
+  let tenant: Tenant | null;
+  try {
+    tenant = await getTenantByWebhookToken(token);
+    if (!tenant) {
+      if (!TOKEN) {
+        console.error("[chartlink] CHARTLINK_WEBHOOK_TOKEN is not set; rejecting all requests");
+        return json({ error: "webhook not configured" }, 500);
+      }
+      if (token === TOKEN) {
+        tenant = await getDefaultTenant();
+      }
+    }
+  } catch (error) {
+    console.error("[chartlink] tenant resolution failed", error);
+    return json({ error: "internal error" }, 500);
+  }
+  if (!tenant) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -270,6 +299,7 @@ export async function POST(req: Request) {
   let processed = 0;
   for (let i = 0; i < parsed.symbols.length; i += 1) {
     await upsertSignal({
+      tenantId: tenant.id,
       symbol: parsed.symbols[i].toUpperCase(),
       signalType,
       price: parsed.prices[i],

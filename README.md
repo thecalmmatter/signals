@@ -72,6 +72,7 @@ psql "$DATABASE_URL" -f scripts/migration_target_hit_lock.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_target_hit_dates.sql
 psql "$DATABASE_URL" -f scripts/migration_backfill_intraday_stop_touches.sql
 psql "$DATABASE_URL" -f scripts/migration_unlock_hblengine_false_stop.sql
+psql "$DATABASE_URL" -f scripts/migration_tenants.sql
 ```
 
 (`schema.sql` is the canonical fresh shape; the `migration_*` files are the live
@@ -553,10 +554,80 @@ npm run build       # production build
 npm run start       # run the production build
 ```
 
+## 13. Multi-tenancy / reseller platform (Phase 1 — in progress)
+
+Goal: let SEBI-registered advisors run their own Telegram audience through
+this app's infra under their own brand and registration, instead of the
+single-operator setup this app has been until now. Full reasoning
+(regulatory split, competitor landscape, why this is a real wedge right
+now) is in `reseller-competitor-analysis.md`.
+
+**Phase 1 (done, this section):** foundational schema, additive and
+backward-compatible — the existing single-operator instance keeps working
+completely unchanged.
+
+- `scripts/migration_tenants.sql` — new `tenants` / `tenant_admins` tables;
+  `signals.tenant_id` (NOT NULL, backfilled to a seeded `'default'` tenant
+  that represents today's single-operator instance); `signals`'s unique
+  constraint becomes `(tenant_id, symbol, trigger_date, scan_url)` instead of
+  just `(symbol, trigger_date, scan_url)`, so two tenants running the same
+  scan on the same symbol on the same day won't collide once a second
+  tenant exists.
+- `lib/tenants.ts` — `getDefaultTenant()`, `getTenantByWebhookToken()`,
+  `getTenantForAdminUser()` (the last one has no caller yet — it's there for
+  Phase 2's admin-scoping work to build on).
+- `app/api/webhooks/chartlink/route.ts` — the `?token=` query param now
+  resolves a tenant one of two ways: a match against a tenant's own
+  `chartlink_webhook_token` (once one is issued), or a match against the
+  legacy `CHARTLINK_WEBHOOK_TOKEN` env var, which resolves to the `'default'`
+  tenant — the path every existing Chartlink alert takes today, unchanged.
+  Every signal row it writes is now stamped with `tenant_id`.
+- `app/api/signals/route.ts` (manual admin "add signal") — also stamps
+  `tenant_id` on new rows (always the `'default'` tenant for now, since this
+  route isn't tenant-scoped yet — see Phase 2 below).
+- `lib/live-signals.ts` — `loadLiveSignals(tenantId?)` takes an optional
+  tenant filter, defaulting to the `'default'` tenant so the ticker and
+  track record page are unaffected until a per-tenant route passes a real
+  one.
+
+**Explicitly NOT done in Phase 1** (each is a bigger, riskier change,
+deliberately deferred rather than rushed):
+
+- `scan_mappings` (scan_url → buy/sell direction) is still global, not
+  tenant-scoped — its primary key is `scan_url` alone, so today every
+  tenant would share the same scan→direction mapping. Needs a composite
+  key change.
+- Billing (Razorpay), the Telegram results channel/digest bot, and the
+  Fyers broker integration are all still single global env-var
+  configuration, not per-tenant. `tenants.telegram_bot_token` /
+  `telegram_chat_id` columns already exist for this but nothing reads them
+  yet.
+- `lib/admin.ts`'s `ADMIN_USER_IDS` allowlist is untouched — no existing
+  admin route (signal editing, user management, billing panel) checks
+  `tenant_admins` yet, so there is only one (implicit) admin scope in
+  practice today, same as before this phase.
+- No reseller-facing signup/onboarding flow exists yet — creating a new
+  tenant today means inserting a row into `tenants` by hand. The SEBI
+  RA/RIA registration-number verification gate described in
+  `reseller-competitor-analysis.md` §1a is not built.
+- No per-tenant branding (subdomain, custom domain, logo/colors) or UI to
+  switch between tenants as an admin.
+
+**Suggested Phase 2+ order:** (1) scope the admin panel and its API routes
+to `tenant_admins` instead of the global allowlist — this is the one that
+actually lets a second tenant operate independently; (2) per-tenant
+Telegram bot config, reading `tenants.telegram_bot_token`/`telegram_chat_id`
+instead of the env vars; (3) the RA/RIA-verified signup flow; (4) per-tenant
+billing/revenue split; (5) `scan_mappings` composite key.
+
 ## Scripts
 
 - `scripts/ingest_signals.py` — legacy manual/backfill generator (single
-  row-per-symbol output, independent of the webhook path).
+  row-per-symbol output, independent of the webhook path). Note: its
+  `ON CONFLICT (symbol, signal_type)` target predates several schema
+  changes (including Phase 1 multi-tenancy above) and no longer matches a
+  real constraint — treat this script as stale/inactive, not a maintained
+  ingestion path.
 - `scripts/schema.sql` — canonical schema.
 - `scripts/migration_*.sql` — incremental schema changes.
 - `scripts/sample_signals.json` — sample output from the generator.

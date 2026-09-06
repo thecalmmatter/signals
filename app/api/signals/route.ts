@@ -7,6 +7,7 @@ import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
 import { loadLiveSignals } from "@/lib/live-signals";
 import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
+import { getDefaultTenant } from "@/lib/tenants";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -126,13 +127,18 @@ export async function POST(req: Request) {
     eventType = "manual_edited";
     eventDetail = `manual add re-used existing active row (entry=${entry}, target=${target}, stop=${stop})`;
   } else {
+    // tenant_id is NOT NULL (scripts/migration_tenants.sql) — this admin
+    // route isn't tenant-scoped yet (Phase 2+), so every manually-created
+    // signal belongs to the 'default' tenant for now, same as the current
+    // single-operator instance's whole signal feed.
+    const tenant = await getDefaultTenant();
     const inserted = await pool.query<{ id: string }>(
       `INSERT INTO signals
-         (symbol, name, signal_type, entry_price, target_price, target_price_2, target_price_3, stop_price,
+         (tenant_id, symbol, name, signal_type, entry_price, target_price, target_price_2, target_price_3, stop_price,
           source, updated_by, notes, status, generated_at, updated_at, days_in)
-       VALUES ($1, $1, $2, $3, $4, $5, $6, $7, 'manual', $8, $9, 'active', now(), now(), 0)
+       VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, 'manual', $9, $10, 'active', now(), now(), 0)
        RETURNING id`,
-      [symbol, type, entry, target, target2, target3, stop, adminId, notes]
+      [tenant.id, symbol, type, entry, target, target2, target3, stop, adminId, notes]
     );
     id = inserted.rows[0].id;
     eventType = "manual_created";

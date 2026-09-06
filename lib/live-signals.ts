@@ -16,6 +16,7 @@
 import { getPool } from "./db";
 import { getQuotes, type Quote } from "./fyers";
 import { announceOutcome } from "./telegram-results";
+import { getDefaultTenant } from "./tenants";
 
 // Calendar date in IST (Asia/Kolkata), formatted YYYY-MM-DD — used to tell
 // whether a signal was generated earlier in today's session (see the
@@ -170,7 +171,7 @@ const BASE_COLUMNS =
   "id, symbol, name, signal_type, price, entry_price, target_price, target_price_2, target_price_3, " +
   "stop_price, days_in, days_to_exit, status, generated_at, updated_at";
 
-async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
+async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: number) {
   // Four tiers, each degrading gracefully rather than taking the whole
   // ticker down:
   //  0. Full — everything below, plus target_1_hit_at/target_2_hit_at/
@@ -184,6 +185,11 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
   //     Sticky lock still works; the exit price just won't be frozen for the
   //     digest feature until the migration runs.
   //  3. Neither — sticky lock disabled entirely, outcome computed live only.
+  //
+  // Every tier also filters on tenant_id (scripts/migration_tenants.sql) —
+  // no fallback tier for a missing tenant_id column, since that migration
+  // is a hard prerequisite for this file (tenant_id is NOT NULL on
+  // `signals`), unlike the other columns above which are optional add-ons.
   try {
     const { rows } = await pool.query(
       `SELECT * FROM (
@@ -191,10 +197,11 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
                 ${BASE_COLUMNS}, outcome_locked, outcome_locked_at, outcome_exit_price,
                 target_1_hit_at, target_2_hit_at, target_3_hit_at
            FROM signals
-          WHERE status = 'active'
+          WHERE status = 'active' AND tenant_id = $1
           ORDER BY symbol, updated_at DESC
        ) t
-       ORDER BY generated_at DESC, symbol`
+       ORDER BY generated_at DESC, symbol`,
+      [tenantId]
     );
     return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: true };
   } catch {
@@ -206,10 +213,11 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
          SELECT DISTINCT ON (symbol)
                 ${BASE_COLUMNS}, outcome_locked, outcome_locked_at, outcome_exit_price
            FROM signals
-          WHERE status = 'active'
+          WHERE status = 'active' AND tenant_id = $1
           ORDER BY symbol, updated_at DESC
        ) t
-       ORDER BY generated_at DESC, symbol`
+       ORDER BY generated_at DESC, symbol`,
+      [tenantId]
     );
     return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: false };
   } catch {
@@ -221,10 +229,11 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
          SELECT DISTINCT ON (symbol)
                 ${BASE_COLUMNS}, outcome_locked, outcome_locked_at
            FROM signals
-          WHERE status = 'active'
+          WHERE status = 'active' AND tenant_id = $1
           ORDER BY symbol, updated_at DESC
        ) t
-       ORDER BY generated_at DESC, symbol`
+       ORDER BY generated_at DESC, symbol`,
+      [tenantId]
     );
     return { rows, lockSupported: true, exitPriceSupported: false, targetHitSupported: false };
   } catch (error) {
@@ -237,18 +246,28 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>) {
          SELECT DISTINCT ON (symbol)
                 ${BASE_COLUMNS}
            FROM signals
-          WHERE status = 'active'
+          WHERE status = 'active' AND tenant_id = $1
           ORDER BY symbol, updated_at DESC
        ) t
-       ORDER BY generated_at DESC, symbol`
+       ORDER BY generated_at DESC, symbol`,
+      [tenantId]
     );
     return { rows, lockSupported: false, exitPriceSupported: false, targetHitSupported: false };
   }
 }
 
-export async function loadLiveSignals(): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
+/** `tenantId` is optional and defaults to the seeded 'default' tenant
+ *  (scripts/migration_tenants.sql) — every current caller (the ticker,
+ *  the track record page) is unmigrated single-tenant code and gets
+ *  today's behavior unchanged. A future per-tenant dashboard route passes
+ *  its own resolved tenantId instead. */
+export async function loadLiveSignals(tenantId?: number): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
   const pool = getPool();
-  const { rows, lockSupported, exitPriceSupported, targetHitSupported } = await queryActiveSignals(pool);
+  const resolvedTenantId = tenantId ?? (await getDefaultTenant()).id;
+  const { rows, lockSupported, exitPriceSupported, targetHitSupported } = await queryActiveSignals(
+    pool,
+    resolvedTenantId
+  );
 
   let quotes = new Map<string, Quote>();
   let quotesOk = true;
