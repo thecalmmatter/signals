@@ -7,10 +7,18 @@ import { Paywall } from "@/components/paywall";
 import { STOCKS } from "@/lib/stocks";
 import { getAccessStatus } from "@/lib/access";
 import { ensureUserRecord } from "@/lib/users";
+import { resolveCustomerTenant } from "@/lib/tenants";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
+
+  // Which tenant this signed-in customer sees (Phase 3, README §13) — falls
+  // back to the 'default' tenant for every existing customer, so this is a
+  // no-op until tenant_customers actually has a row for someone. Only used
+  // here for the header brand name — the Ticker component below fetches
+  // GET /api/signals itself, which resolves the same tenant independently.
+  const tenant = await resolveCustomerTenant(userId);
 
   const user = await currentUser();
   const email =
@@ -39,7 +47,7 @@ export default async function DashboardPage() {
                 <path d="M2 12l3.5-3.5 2.5 2.5L13 5l2 2v6H2z" />
               </svg>
             </span>
-            <span className="text-sm font-semibold tracking-tight">Signals</span>
+            <span className="text-sm font-semibold tracking-tight">{tenant.brandName}</span>
             <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-[11px] font-medium text-zinc-300">
               {access.reason === "disabled"
                 ? "Free (beta)"

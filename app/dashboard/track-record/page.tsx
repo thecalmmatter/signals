@@ -4,6 +4,7 @@ import Link from "next/link";
 import { loadLiveSignals, type LiveSignal } from "@/lib/live-signals";
 import { getCachedStockDetailsBatch } from "@/lib/stock-analytics-cache";
 import { convictionScore, type ConvictionScore } from "@/lib/conviction-score";
+import { resolveCustomerTenant } from "@/lib/tenants";
 import { SymbolLink } from "@/components/symbol-link";
 
 export const dynamic = "force-dynamic";
@@ -114,7 +115,11 @@ export default async function TrackRecordPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
 
-  const { signals, quotesOk } = await loadLiveSignals();
+  // Which tenant this signed-in customer sees (Phase 3, README §13) — falls
+  // back to the 'default' tenant for every existing customer, so this is a
+  // no-op until tenant_customers actually has a row for someone.
+  const tenant = await resolveCustomerTenant(userId);
+  const { signals, quotesOk } = await loadLiveSignals(tenant.id);
   // Read-only, batched (one query, not N) — never triggers a live fetch, just
   // whatever's already cached (see lib/stock-analytics-cache.ts). Powers the
   // Score column below.
@@ -135,7 +140,7 @@ export default async function TrackRecordPage() {
                 <path d="M2 12l3.5-3.5 2.5 2.5L13 5l2 2v6H2z" />
               </svg>
             </span>
-            <span className="text-sm font-semibold tracking-tight">Signals</span>
+            <span className="text-sm font-semibold tracking-tight">{tenant.brandName}</span>
           </div>
           <Link
             href="/dashboard"

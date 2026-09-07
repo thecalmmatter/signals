@@ -257,13 +257,21 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: nu
 }
 
 /** `tenantId` is optional and defaults to the seeded 'default' tenant
- *  (scripts/migration_tenants.sql) — every current caller (the ticker,
- *  the track record page) is unmigrated single-tenant code and gets
- *  today's behavior unchanged. A future per-tenant dashboard route passes
- *  its own resolved tenantId instead. */
+ *  (scripts/migration_tenants.sql). GET /api/signals and the track record
+ *  page (Phase 3, README §13) resolve the signed-in customer's own tenant
+ *  via lib/tenants.ts's resolveCustomerTenant() and pass it in explicitly —
+ *  existing single-tenant customers have no tenant_customers row, so that
+ *  resolves right back to 'default' and their experience is unchanged. */
 export async function loadLiveSignals(tenantId?: number): Promise<{ signals: LiveSignal[]; quotesOk: boolean }> {
   const pool = getPool();
-  const resolvedTenantId = tenantId ?? (await getDefaultTenant()).id;
+  const defaultTenant = await getDefaultTenant();
+  const resolvedTenantId = tenantId ?? defaultTenant.id;
+  // The public Telegram results channel (announceOutcome, below) is still a
+  // single global bot/chat config — not per-tenant yet (README §13). Until
+  // that's built, only announce closes for the 'default' tenant; otherwise
+  // a second tenant's private trade outcomes would get broadcast onto the
+  // operator's own public channel the moment that tenant has real signals.
+  const isDefaultTenant = resolvedTenantId === defaultTenant.id;
   const { rows, lockSupported, exitPriceSupported, targetHitSupported } = await queryActiveSignals(
     pool,
     resolvedTenantId
@@ -502,6 +510,7 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
     // if Telegram is slow or down (announceOutcome is itself best-effort).
     for (const n of newlyLocked) {
       if (!actuallyLocked.has(n.id)) continue;
+      if (!isDefaultTenant) continue;
       await announceOutcome({
         symbol: n.symbol,
         outcome: n.outcome,

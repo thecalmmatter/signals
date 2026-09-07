@@ -7,6 +7,7 @@ import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
 import { loadLiveSignals } from "@/lib/live-signals";
 import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
+import { resolveCustomerTenant } from "@/lib/tenants";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,11 +27,16 @@ export async function GET() {
   if (!access.allowed) return json({ error: "subscription required" }, 402);
 
   try {
+    // Which tenant this signed-in customer sees (Phase 3, README §13) —
+    // falls back to the 'default' tenant for every existing customer, who
+    // has no tenant_customers row yet, so this changes nothing today.
+    const tenant = await resolveCustomerTenant(userId);
+
     // loadLiveSignals is the single source of truth for "what's live right
     // now" (status='active', one row per symbol, live Fyers quotes merged
     // in) — the track record page reads from the exact same place, so the
     // two can never show different lists.
-    const { signals: live } = await loadLiveSignals();
+    const { signals: live } = await loadLiveSignals(tenant.id);
 
     // TickerStock (lib/stocks.ts) expects non-null entry/target/stop —
     // coerce missing values to 0, same as this route always has (a fresh

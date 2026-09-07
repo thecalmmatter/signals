@@ -80,8 +80,8 @@ export async function getTenantByWebhookToken(token: string): Promise<Tenant | n
  *  callers migrating off the legacy ADMIN_USER_IDS allowlist (lib/admin.ts)
  *  should treat that as "not an admin of any tenant" and fall back to the
  *  existing global-allowlist check for backward compatibility during the
- *  transition, not as a hard denial. No route does this yet — this is
- *  here for the next phase to build on. */
+ *  transition, not as a hard denial. Used by lib/admin.ts's
+ *  resolveAdminTenant() (Phase 2). */
 export async function getTenantForAdminUser(userId: string): Promise<Tenant | null> {
   if (!userId) return null;
   const { rows } = await getPool().query(
@@ -93,4 +93,54 @@ export async function getTenantForAdminUser(userId: string): Promise<Tenant | nu
     [userId]
   );
   return rows[0] ? mapTenantRow(rows[0]) : null;
+}
+
+/** Which tenant (if any) a Clerk user id is a CUSTOMER of, via the
+ *  tenant_customers table (scripts/migration_tenant_customers.sql) — a
+ *  reseller's own subscriber, as opposed to getTenantForAdminUser() above
+ *  (that tenant's admin). One row per user: a customer belongs to exactly
+ *  one tenant, unlike tenant_admins which permits (in principle) the same
+ *  user administering more than one. Returns null if the user has no
+ *  explicit membership row, OR if the table doesn't exist yet on this
+ *  environment (query error swallowed here, not propagated) — callers
+ *  treat both the same way: "an existing single-operator-instance
+ *  customer," falling back to the default tenant (see
+ *  resolveCustomerTenant() below). That degrade-on-missing-migration
+ *  behavior matters here specifically: unlike the admin/webhook tenant
+ *  paths, this one sits on the customer-facing ticker's hot path
+ *  (GET /api/signals, /dashboard, /dashboard/track-record) — an unhandled
+ *  error here would 500 every signed-in customer's feed if this code ships
+ *  even briefly before scripts/migration_tenant_customers.sql has run. */
+export async function getTenantForCustomer(userId: string): Promise<Tenant | null> {
+  if (!userId) return null;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT ${TENANT_COLUMNS_QUALIFIED}
+         FROM tenant_customers tc
+         JOIN tenants t ON t.id = tc.tenant_id
+        WHERE tc.user_id = $1 AND t.status = 'active'`,
+      [userId]
+    );
+    return rows[0] ? mapTenantRow(rows[0]) : null;
+  } catch (error) {
+    console.error(
+      "getTenantForCustomer: query failed (run scripts/migration_tenant_customers.sql?) — falling back to default tenant",
+      error
+    );
+    return null;
+  }
+}
+
+/** Full tenant resolution for a signed-in customer (not an admin) — used by
+ *  the customer-facing dashboard/track-record/signals routes. Unlike
+ *  resolveAdminTenant() (lib/admin.ts), this never returns null: every
+ *  existing customer today has no tenant_customers row and must keep
+ *  seeing exactly what they see now, so a missing membership falls back to
+ *  the 'default' tenant rather than denying access. A future reseller
+ *  signup flow is what would actually populate tenant_customers for a real
+ *  second tenant's subscribers — until then this always resolves to
+ *  'default'. */
+export async function resolveCustomerTenant(userId: string): Promise<Tenant> {
+  const tenant = await getTenantForCustomer(userId);
+  return tenant ?? getDefaultTenant();
 }

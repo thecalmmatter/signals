@@ -554,7 +554,7 @@ npm run build       # production build
 npm run start       # run the production build
 ```
 
-## 13. Multi-tenancy / reseller platform (Phase 2 — in progress)
+## 13. Multi-tenancy / reseller platform (Phase 3 — in progress)
 
 Goal: let SEBI-registered advisors run their own Telegram audience through
 this app's infra under their own brand and registration, instead of the
@@ -615,6 +615,44 @@ env-var changes per tenant.
   `null`, plus that tenant-scoped signal/position queries actually exclude
   another tenant's rows).
 
+**Phase 3 (done, this section):** the customer-facing side —
+`/dashboard`, `/dashboard/track-record`, and `GET /api/signals` (the
+ticker feed) now resolve and filter by the signed-in customer's own
+tenant, closing the gap Phase 2 left open ("a second tenant's admin can
+manage their own signals, but there's nowhere for their own customers to
+see them").
+
+- `scripts/migration_tenant_customers.sql` — new `tenant_customers` table
+  (`user_id` PRIMARY KEY → `tenant_id`; a customer belongs to exactly one
+  tenant, unlike `tenant_admins`' composite key). No hard ordering
+  requirement against a deploy — see next bullet.
+- `lib/tenants.ts` — `getTenantForCustomer(userId)` and
+  `resolveCustomerTenant(userId)` (always returns a `Tenant`, never `null`:
+  falls back to `'default'` for any user with no `tenant_customers` row,
+  i.e. every existing customer today). Unlike the admin/webhook tenant
+  paths, this one sits on the customer-facing ticker's hot path, so
+  `getTenantForCustomer()` deliberately catches its own query errors and
+  falls back to `null` (→ `'default'`) instead of throwing — this code is
+  safe to deploy before or after the migration runs, no ordering
+  constraint either way.
+- `app/api/signals/route.ts` (GET), `app/dashboard/page.tsx`,
+  `app/dashboard/track-record/page.tsx` — all resolve
+  `resolveCustomerTenant(userId)` and pass the result into
+  `loadLiveSignals(tenant.id)`; the two dashboard pages also render
+  `tenant.brandName` in the header instead of the hardcoded "Signals" —
+  the first visible, working piece of per-tenant branding, ahead of the
+  full subdomain/custom-domain work that's still deferred.
+- `lib/live-signals.ts` — `loadLiveSignals()` no longer announces a closed
+  trade to the public Telegram results channel unless it's the `'default'`
+  tenant's signal. Caught while wiring this phase: the Telegram bot is
+  still single global config (see below), so without this guard a second
+  tenant's private trade closes would've been broadcast onto the
+  operator's own public channel the moment that tenant had a real signal.
+- Verify: `scripts/verify-customer-tenant-scoping.sh` (DB-level — checks
+  both branches of `resolveCustomerTenant()` and that
+  `loadLiveSignals(tenantId)` actually isolates a test tenant's signal from
+  the default tenant's view).
+
 **Explicitly NOT done yet** (each is a bigger, riskier change, deliberately
 deferred rather than rushed):
 
@@ -629,28 +667,29 @@ deferred rather than rushed):
   Fyers broker integration are all still single global env-var
   configuration, not per-tenant. `tenants.telegram_bot_token` /
   `telegram_chat_id` columns already exist for this but nothing reads them
-  yet.
+  yet — a second tenant's trade closes are correctly suppressed from the
+  channel (see Phase 3 above), not yet posted to their own.
 - The user-management page (`/dashboard/admin/users`) and billing panel
   still use `isAdminUserId()`/the global allowlist directly — these are
   operator-only concerns (Clerk users, Razorpay subscriptions) with no
-  per-tenant concept yet, not something a reseller's admin needs access to
-  in this phase.
+  per-tenant concept yet.
 - No reseller-facing signup/onboarding flow exists yet — creating a new
-  tenant (and its first `tenant_admins` row) today means inserting rows by
-  hand. The SEBI RA/RIA registration-number verification gate described in
+  tenant, its first `tenant_admins` row, and its customers'
+  `tenant_customers` rows today all mean inserting rows by hand. The SEBI
+  RA/RIA registration-number verification gate described in
   `reseller-competitor-analysis.md` §1a is not built.
-- No per-tenant branding (subdomain, custom domain, logo/colors) or
-  tenant-scoped customer-facing dashboard route — `/dashboard` and
-  `/dashboard/track-record` still only ever show the `'default'` tenant's
-  signals (`GET /api/signals` and the track record page don't take a
-  tenant param). A second tenant's admin can now manage their own signals
-  and ledger, but there's nowhere yet for their own customers to see them.
+- No per-tenant branding beyond the `brandName` header text above — no
+  subdomain, custom domain, logo, or color theme per tenant. Every tenant
+  also still shares the same billing/paywall (`lib/access.ts`) — a second
+  tenant's customer needs a subscription in the same global Razorpay
+  account, or trial/admin access, exactly like today's customers.
 
-**Suggested next order:** (1) a tenant-scoped customer-facing dashboard
-route (so a second tenant's signals are actually visible to someone); (2)
-per-tenant Telegram bot config, reading `tenants.telegram_bot_token`/
-`telegram_chat_id` instead of the env vars; (3) the RA/RIA-verified signup
-flow; (4) per-tenant billing/revenue split; (5) `scan_mappings` composite
+**Suggested next order:** (1) per-tenant Telegram bot config, reading
+`tenants.telegram_bot_token`/`telegram_chat_id` instead of the env vars —
+so a second tenant's results actually get announced somewhere, not just
+correctly suppressed; (2) the RA/RIA-verified signup flow (this is also
+what would populate `tenant_admins`/`tenant_customers` without hand-written
+SQL); (3) per-tenant billing/revenue split; (4) `scan_mappings` composite
 key.
 
 ## Scripts
@@ -671,3 +710,6 @@ key.
 - `scripts/verify-admin-tenant-scoping.sh` — automated check of Phase 2's
   admin→tenant resolution + signals/positions data isolation, see §13
   above.
+- `scripts/verify-customer-tenant-scoping.sh` — automated check of Phase
+  3's customer→tenant resolution + `loadLiveSignals()` data isolation, see
+  §13 above.
