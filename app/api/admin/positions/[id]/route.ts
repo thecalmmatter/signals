@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminContext } from "@/lib/admin";
 import { POSITION_COLUMNS, mapPositionRow, setTargetHit } from "@/lib/positions-admin";
 
 export const dynamic = "force-dynamic";
@@ -15,11 +15,12 @@ function goodNum(v: unknown): number | null | "invalid" {
   return Number.isFinite(n) ? n : "invalid";
 }
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+export async function PATCH(req: Request, routeCtx: { params: Promise<{ id: string }> }) {
+  const adminCtx = await getAdminContext();
+  if (!adminCtx) return json({ error: "forbidden" }, 403);
+  const { tenant } = adminCtx;
 
-  const { id } = await ctx.params;
+  const { id } = await routeCtx.params;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -28,8 +29,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   const pool = getPool();
-  const prevRes = await pool.query("SELECT id FROM positions WHERE id = $1", [id]);
+  const prevRes = await pool.query("SELECT id, tenant_id FROM positions WHERE id = $1", [id]);
   if (!prevRes.rows[0]) return json({ error: "not found" }, 404);
+  if (Number(prevRes.rows[0].tenant_id) !== tenant.id) return json({ error: "not found" }, 404);
 
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -103,13 +105,17 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   return json({ position: mapPositionRow(updated.rows[0]) }, 200);
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+export async function DELETE(_req: Request, routeCtx: { params: Promise<{ id: string }> }) {
+  const adminCtx = await getAdminContext();
+  if (!adminCtx) return json({ error: "forbidden" }, 403);
+  const { tenant } = adminCtx;
 
-  const { id } = await ctx.params;
+  const { id } = await routeCtx.params;
   const pool = getPool();
-  const res = await pool.query("DELETE FROM positions WHERE id = $1 RETURNING id", [id]);
+  const res = await pool.query(
+    "DELETE FROM positions WHERE id = $1 AND tenant_id = $2 RETURNING id",
+    [id, tenant.id]
+  );
   if (!res.rows[0]) return json({ error: "not found" }, 404);
 
   return json({ ok: true, id }, 200);

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminContext } from "@/lib/admin";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { POSITION_COLUMNS, mapPositionRow, loadLivePricesFor } from "@/lib/positions-admin";
 import { isIndianStockApiConfigured } from "@/lib/indian-stock-api";
@@ -13,28 +13,39 @@ import { ActivityFeed } from "@/components/activity-feed";
 
 export const dynamic = "force-dynamic";
 
-// Positions ledger (scripts/migration_positions.sql) may not be applied yet —
-// degrade to an empty panel instead of a hard 500 if so.
-async function loadPositions() {
+// Positions ledger (scripts/migration_positions.sql + migration_positions_
+// tenant_id.sql) may not be applied yet — degrade to an empty panel instead
+// of a hard 500 if so.
+async function loadPositions(tenantId: number) {
   try {
     const pool = getPool();
     const { rows } = await pool.query(
-      `SELECT ${POSITION_COLUMNS} FROM positions ORDER BY opened_at DESC, id DESC LIMIT 500`
+      `SELECT ${POSITION_COLUMNS} FROM positions WHERE tenant_id = $1 ORDER BY opened_at DESC, id DESC LIMIT 500`,
+      [tenantId]
     );
     return rows.map((r) => mapPositionRow(r));
   } catch (error) {
-    console.error("failed to load positions data (run scripts/migration_positions.sql?)", error);
+    console.error("failed to load positions data (run scripts/migration_positions_tenant_id.sql?)", error);
     return [];
   }
 }
 
 export default async function AdminPage() {
-  const adminId = await getAdminUserId();
-  if (!adminId) redirect("/dashboard");
+  // Tenant-scoped admin context (lib/admin.ts) — resolves either a real
+  // tenant_admins row (Phase 2, a reseller's own admin) or the legacy
+  // ADMIN_USER_IDS allowlist scoped to the 'default' tenant. Everything
+  // below that reads/writes signals or positions is filtered to this
+  // tenant, so two tenants' admins never see each other's data. Scan
+  // mappings and the webhook activity feed are still global — see README
+  // §13 for what's deliberately not tenant-scoped yet.
+  const ctx = await getAdminContext();
+  if (!ctx) redirect("/dashboard");
+  const { tenant } = ctx;
 
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT ${ADMIN_COLUMNS} FROM signals ORDER BY updated_at DESC, id DESC LIMIT 200`
+    `SELECT ${ADMIN_COLUMNS} FROM signals WHERE tenant_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 200`,
+    [tenant.id]
   );
   const { rows: scanRows } = await pool.query(
     "SELECT scan_url, scan_name, signal_type, active FROM scan_mappings ORDER BY scan_name, scan_url"
@@ -45,7 +56,7 @@ export default async function AdminPage() {
     signalType: r.signal_type,
     active: r.active,
   }));
-  const positions = await loadPositions();
+  const positions = await loadPositions(tenant.id);
   const livePrices = await loadLivePricesFor(positions);
   const stockAnalyticsRows = await listStockAnalyticsStatus();
 

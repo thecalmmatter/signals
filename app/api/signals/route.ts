@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminContext } from "@/lib/admin";
 import { getAccessStatus } from "@/lib/access";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
 import { loadLiveSignals } from "@/lib/live-signals";
 import { ensureStockAnalyticsCached } from "@/lib/stock-analytics-cache";
-import { getDefaultTenant } from "@/lib/tenants";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -72,8 +71,9 @@ export async function GET() {
 // Manually create a signal (admin only). This is the "add by hand a signal
 // Chartlink never fired on" path — no webhook involved, source = 'manual'.
 export async function POST(req: Request) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+  const ctx = await getAdminContext();
+  if (!ctx) return json({ error: "forbidden" }, 403);
+  const { userId: adminId, tenant } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -102,12 +102,16 @@ export async function POST(req: Request) {
   const pool = getPool();
 
   // Manual rows have NULL trigger_date/scan_url, so the DB's unique
-  // constraint (symbol, trigger_date, scan_url) doesn't dedupe them — adding
-  // the same symbol twice silently created two active rows. Upsert on the
-  // existing active row for this symbol instead of always inserting.
+  // constraint (tenant_id, symbol, trigger_date, scan_url) doesn't dedupe
+  // them — adding the same symbol twice silently created two active rows.
+  // Upsert on the existing active row for this symbol AND this tenant
+  // instead of always inserting — scoping by tenant_id here matters as soon
+  // as a second tenant exists: without it, one tenant's admin adding a
+  // symbol another tenant already has active would silently take over that
+  // other tenant's row instead of creating their own.
   const existing = await pool.query<{ id: string }>(
-    `SELECT id FROM signals WHERE symbol = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
-    [symbol]
+    `SELECT id FROM signals WHERE tenant_id = $1 AND symbol = $2 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
+    [tenant.id, symbol]
   );
 
   let id: string;
@@ -127,11 +131,10 @@ export async function POST(req: Request) {
     eventType = "manual_edited";
     eventDetail = `manual add re-used existing active row (entry=${entry}, target=${target}, stop=${stop})`;
   } else {
-    // tenant_id is NOT NULL (scripts/migration_tenants.sql) — this admin
-    // route isn't tenant-scoped yet (Phase 2+), so every manually-created
-    // signal belongs to the 'default' tenant for now, same as the current
-    // single-operator instance's whole signal feed.
-    const tenant = await getDefaultTenant();
+    // tenant_id is NOT NULL (scripts/migration_tenants.sql) — stamped with
+    // the resolved admin's own tenant (Phase 2, lib/admin.ts), so a
+    // reseller's admin creates signals under their own tenant, not the
+    // operator's.
     const inserted = await pool.query<{ id: string }>(
       `INSERT INTO signals
          (tenant_id, symbol, name, signal_type, entry_price, target_price, target_price_2, target_price_3, stop_price,
@@ -157,6 +160,7 @@ export async function POST(req: Request) {
   if (entry !== null && target !== null && stop !== null) {
     try {
       await upsertPositionFromSignal(pool, {
+        tenantId: tenant.id,
         signalId: id,
         symbol,
         direction: type as "buy" | "sell",

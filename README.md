@@ -554,7 +554,7 @@ npm run build       # production build
 npm run start       # run the production build
 ```
 
-## 13. Multi-tenancy / reseller platform (Phase 1 — in progress)
+## 13. Multi-tenancy / reseller platform (Phase 2 — in progress)
 
 Goal: let SEBI-registered advisors run their own Telegram audience through
 this app's infra under their own brand and registration, instead of the
@@ -562,73 +562,96 @@ single-operator setup this app has been until now. Full reasoning
 (regulatory split, competitor landscape, why this is a real wedge right
 now) is in `reseller-competitor-analysis.md`.
 
-**Phase 1 (done, this section):** foundational schema, additive and
-backward-compatible — the existing single-operator instance keeps working
-completely unchanged.
+**Phase 1 (done):** foundational schema, additive and backward-compatible.
 
 - `scripts/migration_tenants.sql` — new `tenants` / `tenant_admins` tables;
   `signals.tenant_id` (NOT NULL, backfilled to a seeded `'default'` tenant
   that represents today's single-operator instance); `signals`'s unique
-  constraint becomes `(tenant_id, symbol, trigger_date, scan_url)` instead of
-  just `(symbol, trigger_date, scan_url)`, so two tenants running the same
-  scan on the same symbol on the same day won't collide once a second
-  tenant exists.
+  constraint becomes `(tenant_id, symbol, trigger_date, scan_url)`.
 - `lib/tenants.ts` — `getDefaultTenant()`, `getTenantByWebhookToken()`,
-  `getTenantForAdminUser()` (the last one has no caller yet — it's there for
-  Phase 2's admin-scoping work to build on).
-- `app/api/webhooks/chartlink/route.ts` — the `?token=` query param now
-  resolves a tenant one of two ways: a match against a tenant's own
-  `chartlink_webhook_token` (once one is issued), or a match against the
-  legacy `CHARTLINK_WEBHOOK_TOKEN` env var, which resolves to the `'default'`
-  tenant — the path every existing Chartlink alert takes today, unchanged.
-  Every signal row it writes is now stamped with `tenant_id`.
-- `app/api/signals/route.ts` (manual admin "add signal") — also stamps
-  `tenant_id` on new rows (always the `'default'` tenant for now, since this
-  route isn't tenant-scoped yet — see Phase 2 below).
+  `getTenantForAdminUser()`.
+- `app/api/webhooks/chartlink/route.ts` — the `?token=` query param
+  resolves a tenant (a tenant's own `chartlink_webhook_token`, or the
+  legacy `CHARTLINK_WEBHOOK_TOKEN` env var → `'default'` tenant). Every
+  signal row it writes is stamped with `tenant_id`.
 - `lib/live-signals.ts` — `loadLiveSignals(tenantId?)` takes an optional
-  tenant filter, defaulting to the `'default'` tenant so the ticker and
-  track record page are unaffected until a per-tenant route passes a real
-  one.
+  tenant filter, defaulting to `'default'`.
+- Verify: `scripts/verify-multitenancy.sh` (webhook token resolution +
+  data isolation, against the real deployed endpoint).
 
-**Explicitly NOT done in Phase 1** (each is a bigger, riskier change,
-deliberately deferred rather than rushed):
+**Phase 2 (done, this section):** the admin panel and its write-side API
+routes for signals + the positions ledger are now scoped to `tenant_admins`
+instead of the single global `ADMIN_USER_IDS` allowlist — this is the part
+that actually lets a second tenant's admin operate independently, without
+env-var changes per tenant.
+
+- `scripts/migration_positions_tenant_id.sql` — adds `positions.tenant_id`
+  (NOT NULL), backfilled from each position's linked signal (or `'default'`
+  for hand-logged rows with no signal link). Run AFTER
+  `migration_tenants.sql`.
+- `lib/admin.ts` — rewritten around `resolveAdminTenant(userId)` (pure DB
+  logic, no Clerk — tries a real `tenant_admins` row first, falls back to
+  the legacy `ADMIN_USER_IDS` allowlist scoped to `'default'`) and
+  `getAdminContext()` (the Clerk-wrapped version: `{ userId, tenant }`).
+  `getAdminUserId()` still exists, built on top of `getAdminContext()`, for
+  admin surfaces not yet tenant-scoped (see below) — so this is fully
+  backward-compatible; the single existing operator's access is unchanged.
+- `app/dashboard/admin/page.tsx` — the signals list and positions ledger
+  queries are now `WHERE tenant_id = $1` for the resolved admin's tenant.
+  Scan mappings and the webhook activity feed on the same page are still
+  global (see below).
+- `app/api/signals/route.ts` (POST) / `app/api/signals/[id]/route.ts`
+  (PATCH, DELETE) — create/dedupe/edit/delete are all scoped to the
+  resolved admin's tenant; editing or deleting another tenant's signal
+  returns 404 (not 403 — doesn't reveal that the id exists elsewhere).
+- `app/api/admin/positions/route.ts` (GET, POST) /
+  `app/api/admin/positions/[id]/route.ts` (PATCH, DELETE) — same tenant
+  scoping and ownership checks, mirroring the signals routes.
+- `lib/positions-admin.ts` — `upsertPositionFromSignal()` now takes a
+  required `tenantId` and stamps it on every auto-created ledger row.
+- Verify: `scripts/verify-admin-tenant-scoping.sh` (DB-level — checks
+  `resolveAdminTenant()`'s two branches, including that a user who is
+  neither a tenant admin nor in the legacy allowlist correctly resolves to
+  `null`, plus that tenant-scoped signal/position queries actually exclude
+  another tenant's rows).
+
+**Explicitly NOT done yet** (each is a bigger, riskier change, deliberately
+deferred rather than rushed):
 
 - `scan_mappings` (scan_url → buy/sell direction) is still global, not
   tenant-scoped — its primary key is `scan_url` alone, so today every
   tenant would share the same scan→direction mapping. Needs a composite
   key change.
+- The webhook activity feed (`/api/webhook-events`, shown on the admin
+  page) and the stock-analytics cache/pipeline are still global/unscoped —
+  they're diagnostic/shared-infrastructure surfaces, not tenant data.
 - Billing (Razorpay), the Telegram results channel/digest bot, and the
   Fyers broker integration are all still single global env-var
   configuration, not per-tenant. `tenants.telegram_bot_token` /
   `telegram_chat_id` columns already exist for this but nothing reads them
   yet.
-- `lib/admin.ts`'s `ADMIN_USER_IDS` allowlist is untouched — no existing
-  admin route (signal editing, user management, billing panel) checks
-  `tenant_admins` yet, so there is only one (implicit) admin scope in
-  practice today, same as before this phase.
+- The user-management page (`/dashboard/admin/users`) and billing panel
+  still use `isAdminUserId()`/the global allowlist directly — these are
+  operator-only concerns (Clerk users, Razorpay subscriptions) with no
+  per-tenant concept yet, not something a reseller's admin needs access to
+  in this phase.
 - No reseller-facing signup/onboarding flow exists yet — creating a new
-  tenant today means inserting a row into `tenants` by hand. The SEBI
-  RA/RIA registration-number verification gate described in
+  tenant (and its first `tenant_admins` row) today means inserting rows by
+  hand. The SEBI RA/RIA registration-number verification gate described in
   `reseller-competitor-analysis.md` §1a is not built.
-- No per-tenant branding (subdomain, custom domain, logo/colors) or UI to
-  switch between tenants as an admin.
+- No per-tenant branding (subdomain, custom domain, logo/colors) or
+  tenant-scoped customer-facing dashboard route — `/dashboard` and
+  `/dashboard/track-record` still only ever show the `'default'` tenant's
+  signals (`GET /api/signals` and the track record page don't take a
+  tenant param). A second tenant's admin can now manage their own signals
+  and ledger, but there's nowhere yet for their own customers to see them.
 
-**Suggested Phase 2+ order:** (1) scope the admin panel and its API routes
-to `tenant_admins` instead of the global allowlist — this is the one that
-actually lets a second tenant operate independently; (2) per-tenant
-Telegram bot config, reading `tenants.telegram_bot_token`/`telegram_chat_id`
-instead of the env vars; (3) the RA/RIA-verified signup flow; (4) per-tenant
-billing/revenue split; (5) `scan_mappings` composite key.
-
-**Verifying Phase 1 works, before Phase 2 exists:** there's no UI yet that
-creates or scopes by a second tenant, so a real "log in as a second
-reseller" test isn't possible until Phase 2. What you CAN verify right now
-is the actual isolation mechanism (token → tenant resolution, `tenant_id`
-stamping, and that a non-default tenant's data doesn't leak into the
-default tenant's view) — automated, against the real deployed webhook, via
-`scripts/verify-multitenancy.sh`. It creates its own throwaway tenant +
-scan mapping + signal, hits `/api/webhooks/chartlink`, checks the DB, and
-cleans up after itself. See that script's header comment for usage/flags.
+**Suggested next order:** (1) a tenant-scoped customer-facing dashboard
+route (so a second tenant's signals are actually visible to someone); (2)
+per-tenant Telegram bot config, reading `tenants.telegram_bot_token`/
+`telegram_chat_id` instead of the env vars; (3) the RA/RIA-verified signup
+flow; (4) per-tenant billing/revenue split; (5) `scan_mappings` composite
+key.
 
 ## Scripts
 
@@ -645,3 +668,6 @@ cleans up after itself. See that script's header comment for usage/flags.
   (`./scripts/score.sh RELIANCE`).
 - `scripts/verify-multitenancy.sh` — automated isolation smoke test for
   multi-tenancy Phase 1, see §13 above.
+- `scripts/verify-admin-tenant-scoping.sh` — automated check of Phase 2's
+  admin→tenant resolution + signals/positions data isolation, see §13
+  above.

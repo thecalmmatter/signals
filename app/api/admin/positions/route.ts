@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminContext } from "@/lib/admin";
 import { POSITION_COLUMNS, mapPositionRow } from "@/lib/positions-admin";
 
 export const dynamic = "force-dynamic";
@@ -25,24 +25,26 @@ function optionalNum(v: unknown): number | null | "invalid" {
 // List the track record (admin only — this is the internal ledger, not a
 // public page yet).
 export async function GET() {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+  const ctx = await getAdminContext();
+  if (!ctx) return json({ error: "forbidden" }, 403);
 
   try {
     const { rows } = await getPool().query(
-      `SELECT ${POSITION_COLUMNS} FROM positions ORDER BY opened_at DESC, id DESC LIMIT 500`
+      `SELECT ${POSITION_COLUMNS} FROM positions WHERE tenant_id = $1 ORDER BY opened_at DESC, id DESC LIMIT 500`,
+      [ctx.tenant.id]
     );
     return json({ positions: rows.map((r) => mapPositionRow(r)) }, 200);
   } catch (error) {
-    console.error("GET /api/admin/positions failed (run scripts/migration_positions.sql?)", error);
+    console.error("GET /api/admin/positions failed (run scripts/migration_positions_tenant_id.sql?)", error);
     return json({ positions: [] }, 200);
   }
 }
 
 // Log a position that was posted publicly (admin only).
 export async function POST(req: Request) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+  const ctx = await getAdminContext();
+  if (!ctx) return json({ error: "forbidden" }, 403);
+  const { userId: adminId, tenant } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -79,11 +81,11 @@ export async function POST(req: Request) {
   const pool = getPool();
   const inserted = await pool.query<{ id: string }>(
     `INSERT INTO positions
-       (symbol, direction, entry_price, target_price, target_price_2, target_price_3,
+       (tenant_id, symbol, direction, entry_price, target_price, target_price_2, target_price_3,
         stop_price, notes, created_by, opened_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, CURRENT_DATE))
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::date, CURRENT_DATE))
      RETURNING id`,
-    [symbol, direction, entry, target, target2, target3, stop, notes, adminId, openedAt]
+    [tenant.id, symbol, direction, entry, target, target2, target3, stop, notes, adminId, openedAt]
   );
 
   const row = await pool.query(`SELECT ${POSITION_COLUMNS} FROM positions WHERE id = $1`, [inserted.rows[0].id]);

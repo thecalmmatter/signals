@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
-import { getAdminUserId } from "@/lib/admin";
+import { getAdminContext } from "@/lib/admin";
 import { ADMIN_COLUMNS, mapAdminRow } from "@/lib/signals-admin";
 import { upsertPositionFromSignal } from "@/lib/positions-admin";
 
@@ -18,12 +18,13 @@ const json = (body: unknown, status: number) => NextResponse.json(body, { status
 
 export async function PATCH(
   req: Request,
-  ctx: { params: Promise<{ id: string }> }
+  routeCtx: { params: Promise<{ id: string }> }
 ) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+  const adminCtx = await getAdminContext();
+  if (!adminCtx) return json({ error: "forbidden" }, 403);
+  const { userId: adminId, tenant } = adminCtx;
 
-  const { id } = await ctx.params;
+  const { id } = await routeCtx.params;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -33,11 +34,16 @@ export async function PATCH(
 
   const pool = getPool();
   const prevRes = await pool.query(
-    "SELECT id, status, symbol, trigger_date, scan_name FROM signals WHERE id = $1",
+    "SELECT id, status, symbol, trigger_date, scan_name, tenant_id FROM signals WHERE id = $1",
     [id]
   );
   if (!prevRes.rows[0]) return json({ error: "not found" }, 404);
   const prev = prevRes.rows[0];
+  // Ownership check — a tenant's admin may only edit their own tenant's
+  // signals. Return the same "not found" a stranger would get for someone
+  // else's row, rather than "forbidden", so this doesn't leak whether the
+  // id exists under another tenant.
+  if (Number(prev.tenant_id) !== tenant.id) return json({ error: "not found" }, 404);
 
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -143,6 +149,7 @@ export async function PATCH(
   if (fresh.entry_price !== null && fresh.target_price !== null && fresh.stop_price !== null) {
     try {
       await upsertPositionFromSignal(pool, {
+        tenantId: tenant.id,
         signalId: id,
         symbol: String(fresh.symbol),
         direction: fresh.signal_type as "buy" | "sell",
@@ -162,18 +169,20 @@ export async function PATCH(
   return json({ signal: mapAdminRow(fresh) }, 200);
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const adminId = await getAdminUserId();
-  if (!adminId) return json({ error: "forbidden" }, 403);
+export async function DELETE(_req: Request, routeCtx: { params: Promise<{ id: string }> }) {
+  const adminCtx = await getAdminContext();
+  if (!adminCtx) return json({ error: "forbidden" }, 403);
+  const { tenant } = adminCtx;
 
-  const { id } = await ctx.params;
+  const { id } = await routeCtx.params;
   const pool = getPool();
   const prevRes = await pool.query(
-    "SELECT id, symbol, trigger_date, scan_name FROM signals WHERE id = $1",
+    "SELECT id, symbol, trigger_date, scan_name, tenant_id FROM signals WHERE id = $1",
     [id]
   );
   if (!prevRes.rows[0]) return json({ error: "not found" }, 404);
   const prev = prevRes.rows[0];
+  if (Number(prev.tenant_id) !== tenant.id) return json({ error: "not found" }, 404);
 
   // Trace the removal, then delete the row. The signal_events FK is
   // ON DELETE SET NULL, so it keeps the symbol/date/scan context.

@@ -153,6 +153,7 @@ export async function loadLivePricesFor(positions: AdminPosition[]): Promise<Rec
 export async function upsertPositionFromSignal(
   pool: Pool,
   params: {
+    tenantId: number;
     signalId: string | number;
     symbol: string;
     direction: "buy" | "sell";
@@ -167,9 +168,9 @@ export async function upsertPositionFromSignal(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO positions
-       (signal_id, symbol, direction, entry_price, target_price, target_price_2, target_price_3,
+       (tenant_id, signal_id, symbol, direction, entry_price, target_price, target_price_2, target_price_3,
         stop_price, created_by, opened_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::date, CURRENT_DATE))
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::date, CURRENT_DATE))
      ON CONFLICT (signal_id) WHERE signal_id IS NOT NULL DO UPDATE SET
        symbol         = EXCLUDED.symbol,
        direction      = EXCLUDED.direction,
@@ -180,6 +181,7 @@ export async function upsertPositionFromSignal(
        stop_price     = EXCLUDED.stop_price,
        updated_at     = now()`,
     [
+      params.tenantId,
       params.signalId,
       params.symbol,
       params.direction,
