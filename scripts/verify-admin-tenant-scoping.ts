@@ -55,7 +55,10 @@ async function main() {
       `INSERT INTO tenants (slug, brand_name, status) VALUES ($1, $2, 'active') RETURNING id`,
       [tenantSlug, `Verify Admin ${suffix}`]
     );
-    tenantId = tenantRes.rows[0].id;
+    // tenants.id is BIGINT — node-pg returns it as a string, not a number.
+    // Coerce here so the strict-equality check against resolveAdminTenant()'s
+    // (already-numeric) result below compares like types.
+    tenantId = Number(tenantRes.rows[0].id);
     console.log(`Created test tenant id=${tenantId}`);
 
     await pool.query(`INSERT INTO tenant_admins (tenant_id, user_id) VALUES ($1, $2)`, [
