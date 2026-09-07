@@ -620,6 +620,16 @@ Telegram bot config, reading `tenants.telegram_bot_token`/`telegram_chat_id`
 instead of the env vars; (3) the RA/RIA-verified signup flow; (4) per-tenant
 billing/revenue split; (5) `scan_mappings` composite key.
 
+**Verifying Phase 1 works, before Phase 2 exists:** there's no UI yet that
+creates or scopes by a second tenant, so a real "log in as a second
+reseller" test isn't possible until Phase 2. What you CAN verify right now
+is the actual isolation mechanism (token → tenant resolution, `tenant_id`
+stamping, and that a non-default tenant's data doesn't leak into the
+default tenant's view) — automated, against the real deployed webhook, via
+`scripts/verify-multitenancy.sh`. It creates its own throwaway tenant +
+scan mapping + signal, hits `/api/webhooks/chartlink`, checks the DB, and
+cleans up after itself. See that script's header comment for usage/flags.
+
 ## Scripts
 
 - `scripts/ingest_signals.py` — legacy manual/backfill generator (single
@@ -631,3 +641,7 @@ billing/revenue split; (5) `scan_mappings` composite key.
 - `scripts/schema.sql` — canonical schema.
 - `scripts/migration_*.sql` — incremental schema changes.
 - `scripts/sample_signals.json` — sample output from the generator.
+- `scripts/score.sh` — manual conviction-score check for a single symbol
+  (`./scripts/score.sh RELIANCE`).
+- `scripts/verify-multitenancy.sh` — automated isolation smoke test for
+  multi-tenancy Phase 1, see §13 above.
