@@ -18,9 +18,9 @@ export default async function DashboardPage() {
   // no-op until tenant_customers actually has a row for someone. Only used
   // here for the header brand name — the Ticker component below fetches
   // GET /api/signals itself, which resolves the same tenant independently.
-  const tenant = await resolveCustomerTenant(userId);
-
-  const user = await currentUser();
+  // Independent of the Clerk currentUser() call below (different data
+  // sources entirely), so run them concurrently rather than back to back.
+  const [tenant, user] = await Promise.all([resolveCustomerTenant(userId), currentUser()]);
   const email =
     user?.primaryEmailAddress?.emailAddress ??
     user?.emailAddresses?.[0]?.emailAddress ??

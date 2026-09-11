@@ -23,6 +23,14 @@ export function LandingParticleCanvas() {
     let width = 0;
     let height = 0;
     let rafId = 0;
+    // Runs an O(n^2) pairwise distance check (connect(), below) every frame
+    // forever by default — real, measurable CPU/battery cost on a page
+    // that's purely decorative. Paused (not just left running off-screen)
+    // whenever the tab is hidden or the hero section has scrolled out of
+    // view, resumed when either becomes true again.
+    let running = false;
+    let visible = true;
+    let tabVisible = document.visibilityState === "visible";
 
     type Particle = {
       x: number;
@@ -108,7 +116,25 @@ export function LandingParticleCanvas() {
         ctx!.fill();
       }
       connect();
-      if (!reducedMotion) rafId = requestAnimationFrame(frame);
+      if (!reducedMotion && running) {
+        rafId = requestAnimationFrame(frame);
+      }
+    }
+
+    // Starts/stops the rAF loop based on the two independent gates above —
+    // called whenever either one changes, instead of each gate managing the
+    // loop directly, so hidden+off-screen (the common case once the user
+    // has scrolled past the hero and backgrounded the tab) doesn't double-
+    // schedule or leak a frame.
+    function syncRunning() {
+      const shouldRun = tabVisible && visible && !reducedMotion;
+      if (shouldRun && !running) {
+        running = true;
+        frame();
+      } else if (!shouldRun && running) {
+        running = false;
+        cancelAnimationFrame(rafId);
+      }
     }
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -120,19 +146,46 @@ export function LandingParticleCanvas() {
       mouse.x = null;
       mouse.y = null;
     };
+    const handleVisibilityChange = () => {
+      tabVisible = document.visibilityState === "visible";
+      syncRunning();
+    };
 
     resize();
-    frame();
+
+    // IntersectionObserver — the hero section (this canvas's parent) is
+    // near the top of a long marketing page; once the user scrolls past it
+    // there's no visual reason to keep animating, so stop burning CPU.
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        visible = entry.isIntersecting;
+        syncRunning();
+      },
+      { threshold: 0 }
+    );
+    observer.observe(canvas);
+
+    if (reducedMotion) {
+      // Single static frame, as documented on the component — never starts
+      // the loop at all.
+      frame();
+    } else {
+      syncRunning();
+    }
 
     window.addEventListener("resize", resize);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     if (!reducedMotion) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseleave", handleMouseLeave);
     }
 
     return () => {
+      running = false;
       cancelAnimationFrame(rafId);
+      observer.disconnect();
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseleave", handleMouseLeave);
     };

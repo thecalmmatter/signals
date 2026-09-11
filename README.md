@@ -692,6 +692,77 @@ what would populate `tenant_admins`/`tenant_customers` without hand-written
 SQL); (3) per-tenant billing/revenue split; (4) `scan_mappings` composite
 key.
 
+## 14. Performance
+
+A few concrete changes made after noticing the app felt slow at times,
+plus honest notes on what does and doesn't actually help here.
+
+**Speculation Rules (`app/layout.tsx`)** — a `<script type="speculationrules">`
+tells Chromium browsers (Chrome/Edge/Opera; other browsers silently ignore
+an unrecognized `<script type>`, so this is a safe no-op there) to
+speculatively prefetch/prerender a same-origin page ahead of a click.
+Scoped deliberately, not blanket:
+
+- Marketing/public pages (everything except `/api/*` and `/dashboard/*`)
+  get full `prerender` at `"moderate"` eagerness (hover ~200ms) — cheap to
+  render, not personalized, worth the resource cost for the sign-up funnel.
+- `/dashboard/*` (excluding `/dashboard/admin/*`) gets only lighter
+  `prefetch` at `"conservative"` eagerness (click-triggered only) — these
+  pages are personalized and DB/live-Fyers-quote backed
+  (`loadLiveSignals()`), so a casual hover shouldn't speculatively fire
+  those calls for a page that might never actually open.
+- `/api/*` and `/dashboard/admin/*` are excluded from both entirely.
+
+**Important honest caveat, confirmed against MDN and Vercel's own guidance
+before adding this:** the Speculation Rules API targets full browser
+("hard") navigations — it's designed for traditional multi-page sites.
+Next.js's App Router intercepts `<Link>` clicks after the page has
+hydrated and does its own client-side ("soft") navigation instead, which
+means the browser's real navigation (and therefore the prerendered/
+prefetched page) never actually activates for most in-app link clicks —
+Next.js already automatically prefetches `<Link>` targets as they enter
+the viewport, which is what's actually speeding up those clicks today.
+Where Speculation Rules genuinely helps in a Next.js app like this one:
+the very first click before the page's JS has hydrated (slower devices/
+connections), plain non-`<Link>` anchors, and true hard navigations. It's
+a real, safe, zero-regression addition — just not a blanket "makes every
+click instant" fix the way it would be on a classic multi-page site.
+Sources: [MDN Speculation Rules API](https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API),
+[Vercel: Optimizing hard navigations](https://vercel.com/kb/guide/optimizing-hard-navigations).
+
+**Landing hero particle canvas (`components/landing-particle-canvas.tsx`)**
+— found and fixed a real, separate performance issue while looking into
+this: the decorative particle animation ran an O(n²) pairwise
+distance-check every frame, forever, with no pause — even after the user
+scrolled past the hero, and even with the tab backgrounded. Now paused via
+`document.visibilitychange` (tab hidden) and an `IntersectionObserver`
+(hero scrolled out of view), resuming when either becomes true again. Pure
+CPU/battery waste eliminated; no visual change while the hero is on
+screen.
+
+**Parallelized independent DB/API reads** — several server components
+were doing sequential `await`s for reads that don't depend on each other,
+paying for N round trips back to back instead of running concurrently.
+Fixed with `Promise.all` in:
+- `app/dashboard/admin/page.tsx` — the signals list, scan mappings,
+  positions ledger, and stock-analytics status queries are independent;
+  only `loadLivePricesFor(positions)` genuinely has to wait on positions.
+- `app/dashboard/stocks/[symbol]/page.tsx` — `loadLiveSignals()` (which
+  can be slow: live Fyers quotes for every active symbol, not just this
+  page's) and the stock-analytics cache lookup are independent.
+- `app/dashboard/page.tsx` — the new tenant lookup (Phase 3, §13) and
+  Clerk's `currentUser()` are independent. `ensureUserRecord()` →
+  `getAccessStatus()` stay sequential on purpose — that ordering is the
+  fix from an earlier session (a brand-new user's very first page load
+  needs their DB row to exist before the access check runs).
+
+**Not changed, and why:** `app/dashboard/track-record/page.tsx` fetches
+`loadLiveSignals()` then batches stock details for exactly the symbols
+that came back — a genuine dependency, not parallelizable. Every dashboard
+route stays `force-dynamic` on purpose (per-user, per-tenant, live-price
+data — none of it is safe to statically cache); the real lever there is
+the query/quote parallelization above, not disabling dynamic rendering.
+
 ## Scripts
 
 - `scripts/ingest_signals.py` — legacy manual/backfill generator (single

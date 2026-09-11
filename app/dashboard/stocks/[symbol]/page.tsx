@@ -19,15 +19,20 @@ export default async function StockAnalyticsPage({
   const symbol = rawSymbol.toUpperCase();
 
   // Same source as the ticker/track-record page — if this symbol has an
-  // active signal, the numbers here can never disagree with the rest of the app.
-  const { signals } = await loadLiveSignals();
+  // active signal, the numbers here can never disagree with the rest of the
+  // app. Independent of the stock-analytics lookup below (different tables,
+  // different upstream APIs), so run them concurrently instead of paying
+  // for both round trips back to back — loadLiveSignals in particular can
+  // be slow (live Fyers quotes for every active symbol, not just this one).
+  const [{ signals }, { stock, error: stockError }] = await Promise.all([
+    loadLiveSignals(),
+    // Reads from stock_analytics_cache (lib/stock-analytics-cache.ts) — only
+    // falls through to a live upstream fetch on a true cache miss (a symbol
+    // never attempted before), so a normal page view doesn't re-hit the
+    // rate-limited third-party API every time.
+    getOrPopulateStockDetails(symbol),
+  ]);
   const signal = signals.find((s) => s.symbol === symbol) ?? null;
-
-  // Reads from stock_analytics_cache (lib/stock-analytics-cache.ts) — only
-  // falls through to a live upstream fetch on a true cache miss (a symbol
-  // never attempted before), so a normal page view doesn't re-hit the
-  // rate-limited third-party API every time.
-  const { stock, error: stockError } = await getOrPopulateStockDetails(symbol);
 
   return (
     <div className="flex flex-1 flex-col">

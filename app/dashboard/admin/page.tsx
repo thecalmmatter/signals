@@ -43,22 +43,29 @@ export default async function AdminPage() {
   const { tenant } = ctx;
 
   const pool = getPool();
-  const { rows } = await pool.query(
-    `SELECT ${ADMIN_COLUMNS} FROM signals WHERE tenant_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 200`,
-    [tenant.id]
-  );
-  const { rows: scanRows } = await pool.query(
-    "SELECT scan_url, scan_name, signal_type, active FROM scan_mappings ORDER BY scan_name, scan_url"
-  );
-  const scanMappings = scanRows.map((r) => ({
+  // Four independent reads — was four sequential round trips (each waiting
+  // on the last for no reason), now one round-trip's worth of wall-clock
+  // time. loadLivePricesFor needs positions' symbols first, so it stays
+  // after this Promise.all rather than joining it.
+  const [signalsRes, scanMappingsRes, positions, stockAnalyticsRows] = await Promise.all([
+    pool.query(
+      `SELECT ${ADMIN_COLUMNS} FROM signals WHERE tenant_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 200`,
+      [tenant.id]
+    ),
+    pool.query(
+      "SELECT scan_url, scan_name, signal_type, active FROM scan_mappings ORDER BY scan_name, scan_url"
+    ),
+    loadPositions(tenant.id),
+    listStockAnalyticsStatus(),
+  ]);
+  const rows = signalsRes.rows;
+  const scanMappings = scanMappingsRes.rows.map((r) => ({
     scanUrl: r.scan_url,
     scanName: r.scan_name,
     signalType: r.signal_type,
     active: r.active,
   }));
-  const positions = await loadPositions(tenant.id);
   const livePrices = await loadLivePricesFor(positions);
-  const stockAnalyticsRows = await listStockAnalyticsStatus();
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-950 text-zinc-100">
