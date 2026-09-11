@@ -18,10 +18,12 @@ function daysSince(generatedAt: string): number {
 }
 
 // The furthest target actually reached so far, if any — null while nothing
-// has been hit yet. Only meaningful for a multi-target signal: hitting the
-// sole/furthest target on a single-target signal closes the trade outright
-// (see computeOutcome() in lib/live-signals.ts), so this only ever fires
-// while the trade is still "open" with T2/T3 still ahead of it.
+// has been hit yet. Once a target is hit this is permanent (sticky
+// target1Hit/target2Hit/target3Hit flags, see lib/live-signals.ts): it stays
+// the reference price even if the trade later closes via stop, since the
+// user's explicit call is "the target reached wins, always" — a genuinely
+// hit target is a real, achieved number and shouldn't be erased by what the
+// trade does afterward.
 function furthestHitTarget(s: LiveSignal): number | null {
   const hit: number[] = [];
   if (s.target1Hit && s.target !== null) hit.push(s.target);
@@ -31,55 +33,22 @@ function furthestHitTarget(s: LiveSignal): number | null {
   return s.signal === "sell" ? Math.min(...hit) : Math.max(...hit);
 }
 
-// Which target label (T1/T2/T3) corresponds to furthestHitTarget() above —
-// for display only ("peaked +8.1% at T1"). Picks the highest-numbered target
-// that's been hit, which lines up with furthestHitTarget()'s furthest-price
-// pick as long as a signal's own targets are monotonic by direction (T2
-// further than T1, T3 further than T2) — true for every signal this app
-// generates.
-function furthestHitLabel(s: LiveSignal): string | null {
-  if (s.target3Hit && s.target3 !== null) return "T3";
-  if (s.target2Hit && s.target2 !== null) return "T2";
-  if (s.target1Hit && s.target !== null) return "T1";
-  return null;
-}
-
-// The return that was actually achieved when the furthest target got hit,
-// regardless of what happened afterward. Only meaningful for a trade that
-// later got stopped out after reaching a target first (e.g. TEJASNET: hit T1,
-// retraced, later stopped) — the final Return column correctly shows the
-// honest closed-trade loss, but that alone hides the fact that a target was
-// genuinely reached along the way. Shown as a secondary "(peaked +X% at T1)"
-// note next to the final Return, never in place of it.
-function peakReturnAtTarget(s: LiveSignal): number | null {
-  if (s.entry === null || !s.entry) return null;
-  const locked = furthestHitTarget(s);
-  if (locked === null) return null;
-  const raw = ((locked - s.entry) / s.entry) * 100;
-  return s.signal === "sell" ? -raw : raw;
-}
-
 // The price to judge a trade against:
-//   - Closed (stopped/target_hit): the frozen exit price, never the live
-//     quote — the live price keeps drifting after the fact (a "stopped"
-//     trade can float back above the stop hours later), which was exactly
-//     the confusing bit.
-//   - Still open, but a target has already been reached (only possible on a
-//     multi-target signal — see furthestHitTarget() above): lock to that
-//     target's price instead of the live quote. A target that was genuinely
-//     hit is a real, achieved number; showing the return keep drifting (and
-//     potentially going negative) as price later retraces past it, just
-//     because T2/T3 haven't printed yet, buried the fact that T1 actually
-//     happened.
+//   - Any target ever reached (see furthestHitTarget() above): locks to that
+//     target's price, permanently — even if the trade later stops out. A
+//     target that was genuinely hit doesn't un-happen because price
+//     retraced afterward.
+//   - No target ever hit, but closed (stopped): the frozen exit price, never
+//     the live quote — the live price keeps drifting after the fact.
 //   - Otherwise: the live quote.
 // Falls back to the live price if a legacy closed row somehow has no exit
 // price recorded.
 function referencePrice(s: LiveSignal): number {
+  const locked = furthestHitTarget(s);
+  if (locked !== null) return locked;
   if ((s.outcome === "stopped" || s.outcome === "target_hit") && s.exitPrice !== null) {
     return s.exitPrice;
   }
-  const locked = furthestHitTarget(s);
-  if (locked !== null) return locked;
   return s.price;
 }
 
@@ -214,10 +183,11 @@ export default async function TrackRecordPage() {
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
             This tracks exactly what&rsquo;s live in the signal feed right now — nothing suppressed,
             nothing closed out and dropped, nothing added separately. Return % is live price vs
-            entry while a trade is open, and the actual stop/target exit price vs entry once it&rsquo;s
-            closed — never the live price after the fact, since that keeps drifting once the trade
-            is already over. Not every signal performs as expected — that&rsquo;s the point of
-            showing it unfiltered.
+            entry while a trade is open. Once any target (T1/T2/T3) is hit, the return locks to
+            that target permanently 🔒 — even if the trade later reverses and stops out. If no
+            target was ever reached, the actual stop exit price vs entry is shown instead, never
+            the live price after the fact. Not every signal performs as expected — that&rsquo;s the
+            point of showing it unfiltered.
           </p>
           {!quotesOk && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
@@ -279,12 +249,10 @@ export default async function TrackRecordPage() {
               {signals.map((s) => {
                 const ret = returnPct(s);
                 const closed = s.outcome === "stopped" || s.outcome === "target_hit";
-                const lockedAt = closed ? null : furthestHitTarget(s);
-                // Only a stopped-out trade needs the "peaked at" note — a
-                // target_hit trade's exit price already *is* the furthest
-                // target, so ret and the peak are the same number.
-                const peak = s.outcome === "stopped" ? peakReturnAtTarget(s) : null;
-                const peakLabel = peak !== null ? furthestHitLabel(s) : null;
+                // Locked whenever any target's been hit — permanent, even if
+                // the trade later stops out (see furthestHitTarget()/
+                // referencePrice() above).
+                const lockedAt = furthestHitTarget(s);
                 const stockDetails = stockMap.get(s.symbol) ?? null;
                 const hasResearch = stockDetails !== null;
                 const score = convictionScore(s, stockDetails);
@@ -353,7 +321,7 @@ export default async function TrackRecordPage() {
                       }`}
                       title={
                         lockedAt !== null
-                          ? `Locked at ${inr(lockedAt)} — the furthest target reached so far. Trade is still open toward the remaining target(s); this won't drift with the live price.`
+                          ? `Locked at ${inr(lockedAt)} — the furthest target reached. Permanent once a target is hit, even if the trade later stops out.`
                           : undefined
                       }
                     >
@@ -361,15 +329,6 @@ export default async function TrackRecordPage() {
                       {lockedAt !== null && (
                         <span className="ml-1 text-zinc-500" aria-hidden="true">
                           🔒
-                        </span>
-                      )}
-                      {peakLabel !== null && peak !== null && (
-                        <span
-                          className="ml-1.5 text-[11px] font-normal text-zinc-500"
-                          title={`Reached ${inr(furthestHitTarget(s)!)} at ${peakLabel} before the stop was hit — price later retraced and stopped out, so the final return above reflects that honest loss, not the ${peak >= 0 ? "+" : ""}${peak.toFixed(1)}% that was actually touched.`}
-                        >
-                          (peaked {peak >= 0 ? "+" : ""}
-                          {peak.toFixed(1)}% at {peakLabel})
                         </span>
                       )}
                     </td>

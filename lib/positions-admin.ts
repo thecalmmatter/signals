@@ -109,11 +109,12 @@ export function daysHeld(openedAt: string | null, closedAt: string | null): numb
 }
 
 // The furthest target actually marked hit so far, if any — null while
-// nothing's been hit yet. Mirrors the same logic on the public track record
-// page (app/dashboard/track-record/page.tsx furthestHitTarget()): only
-// meaningful for a multi-target position, since reaching the sole/furthest
-// target normally closes the position via the "Hit target" button instead.
-function furthestHitTarget(p: AdminPosition): number | null {
+// nothing's been hit yet. Mirrors the identical helper on the public track
+// record page (app/dashboard/track-record/page.tsx furthestHitTarget()).
+// Once a target's hit, this stays the reference price permanently — even if
+// the position is later marked hit_stop — per the explicit call: the target
+// reached wins, always.
+export function furthestHitTarget(p: AdminPosition): number | null {
   const hit: number[] = [];
   if (p.target1HitAt) hit.push(p.targetPrice);
   if (p.target2HitAt && p.targetPrice2 !== null) hit.push(p.targetPrice2);
@@ -123,47 +124,26 @@ function furthestHitTarget(p: AdminPosition): number | null {
 }
 
 // Return since entry, as a %.
-//   - Closed positions use the stored exit_price, no live call needed.
-//   - Open positions with a target already marked hit (multi-target only —
-//     see furthestHitTarget()) lock to that target's price instead of the
-//     live quote, so the return reflects what was actually achieved instead
-//     of drifting (and potentially going negative) as price retraces past a
-//     level that was genuinely reached.
-//   - Otherwise, the live quote (undefined if Fyers is down/unconfigured or
-//     this symbol has no quote — degrades to null rather than a wrong
-//     number).
+//   - Any target ever hit (see furthestHitTarget()): locks to that target's
+//     price, permanently — even once the position is later marked hit_stop.
+//   - No target ever hit, but closed: the stored exit_price, no live call
+//     needed.
+//   - No target hit, still open: the live quote (undefined if Fyers is
+//     down/unconfigured or this symbol has no quote — degrades to null
+//     rather than a wrong number).
 // Flips sign for sell/short in all cases.
 export function returnPct(p: AdminPosition, livePrice: number | undefined): number | null {
+  const locked = furthestHitTarget(p);
   let current: number | null;
-  if (p.status !== "open") {
+  if (locked !== null) {
+    current = locked;
+  } else if (p.status !== "open") {
     current = p.exitPrice;
   } else {
-    current = furthestHitTarget(p) ?? livePrice ?? null;
+    current = livePrice ?? null;
   }
   if (current === null || current === undefined || !p.entryPrice) return null;
   const raw = ((current - p.entryPrice) / p.entryPrice) * 100;
-  return p.direction === "sell" ? -raw : raw;
-}
-
-// Which target label (T1/T2/T3) corresponds to furthestHitTarget() — for
-// display only. Mirrors the identical helper on the public track record page
-// (app/dashboard/track-record/page.tsx furthestHitLabel()).
-export function furthestHitLabel(p: AdminPosition): string | null {
-  if (p.target3HitAt && p.targetPrice3 !== null) return "T3";
-  if (p.target2HitAt && p.targetPrice2 !== null) return "T2";
-  if (p.target1HitAt) return "T1";
-  return null;
-}
-
-// The return actually achieved when the furthest target was hit, regardless
-// of what happened afterward — for a "hit_stop" position that reached a
-// target before the stop, so its true final return() (correctly, the honest
-// stop-out loss) doesn't silently hide that a target was genuinely reached.
-// Mirrors peakReturnAtTarget() on the public track record page.
-export function peakReturnAtTarget(p: AdminPosition): number | null {
-  const locked = furthestHitTarget(p);
-  if (locked === null || !p.entryPrice) return null;
-  const raw = ((locked - p.entryPrice) / p.entryPrice) * 100;
   return p.direction === "sell" ? -raw : raw;
 }
 

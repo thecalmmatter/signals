@@ -7,13 +7,12 @@ import {
   STATUS_LABEL,
   daysHeld,
   returnPct,
-  peakReturnAtTarget,
-  furthestHitLabel,
+  furthestHitTarget,
 } from "@/lib/positions-admin";
 
-// Mirrors lib/positions-admin.ts's internal furthestHitTarget() — only used
-// here to decide the Return cell's tooltip wording, not the number itself
-// (that's still computed by returnPct()).
+// Used to decide the Return cell's tooltip wording and 🔒 icon, not the
+// number itself (that's computed by returnPct(), which already locks to
+// this same target permanently once hit — see lib/positions-admin.ts).
 function anyTargetHit(p: AdminPosition): boolean {
   return Boolean(p.target1HitAt || p.target2HitAt || p.target3HitAt);
 }
@@ -446,10 +445,7 @@ export default function AdminPositions({
               const closed = r.status !== "open";
               const ret = returnPct(r, livePrices[r.symbol]);
               const days = daysHeld(r.openedAt, r.closedAt);
-              // Only a hit_stop position needs the "peaked at" note — hit_target's
-              // exit price already is the furthest target hit.
-              const peak = r.status === "hit_stop" ? peakReturnAtTarget(r) : null;
-              const peakLabel = peak !== null ? furthestHitLabel(r) : null;
+              const lockedAt = furthestHitTarget(r);
               return (
                 <tr key={r.id} className={`bg-zinc-950 transition ${closed ? "opacity-80" : ""}`}>
                   <td className="px-3 py-2.5">
@@ -543,26 +539,17 @@ export default function AdminPositions({
                         ? r.status === "open"
                           ? "no live price (Fyers down/unconfigured, or no quote for this symbol)"
                           : "no exit price logged yet"
-                        : r.status === "open"
-                          ? anyTargetHit(r)
-                            ? "locked to the furthest target hit so far — won't drift with the live price until closed"
-                            : "vs live price"
-                          : "vs logged exit price"
+                        : anyTargetHit(r)
+                          ? "locked to the furthest target hit — permanent, even if later marked hit_stop"
+                          : r.status === "open"
+                            ? "vs live price"
+                            : "vs logged exit price"
                     }
                   >
                     {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
-                    {r.status === "open" && anyTargetHit(r) && (
+                    {lockedAt !== null && (
                       <span className="ml-1 text-zinc-500" aria-hidden="true">
                         🔒
-                      </span>
-                    )}
-                    {peakLabel !== null && peak !== null && (
-                      <span
-                        className="ml-1.5 text-[11px] font-normal text-zinc-500"
-                        title={`Reached +${peak.toFixed(1)}% at ${peakLabel} before the stop was hit — price later retraced and stopped out, so the return above reflects that honest loss.`}
-                      >
-                        (peaked {peak >= 0 ? "+" : ""}
-                        {peak.toFixed(1)}% at {peakLabel})
                       </span>
                     )}
                   </td>

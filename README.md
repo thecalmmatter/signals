@@ -215,35 +215,27 @@ source of truth for a future win-rate / statistical-edge report.
   `upsertPositionFromSignal` (`lib/positions-admin.ts`) is called from
   `POST /api/signals` and `PATCH /api/signals/[id]` — it never blocks the
   signal write if it fails (e.g. migration not applied yet).
-- **Return % locks to the furthest target hit, not the live price, on a
-  still-open multi-target trade** (bug fix, 2026-09-11 — HBLENGINE,
-  TEJASNET, SBICARD all hit T1 while T2/T3 were still open, and the
-  displayed return kept drifting with the live price — even going negative
-  on a retrace — instead of reflecting that T1 had genuinely been reached).
-  `app/dashboard/track-record/page.tsx`'s `referencePrice()` and
-  `lib/positions-admin.ts`'s `returnPct()` now check the sticky
-  `target1Hit`/`target2Hit`/`target3Hit` flags first: if any target's been
-  reached and the trade isn't fully closed yet, the return is computed
-  against the furthest one hit (not the live quote), shown with a 🔒 and a
-  tooltip explaining why. Only ever applies to a multi-target signal —
-  hitting the sole/furthest target on a single-target signal already closes
-  the trade outright (see `computeOutcome()`), so this doesn't change
-  anything for those. Applies automatically to every future signal, not
-  just these three.
-- **"Peaked at TX" note for a trade that hit a target and later stopped out**
-  (refinement, 2026-09-11 — TEJASNET hit T1 on 2026-09-04, then retraced and
-  got stopped out on 2026-09-11; the honest closed-trade Return correctly
-  showed the real loss, but that alone hid the fact T1 had genuinely been
-  reached). The final Return still shows the honest closed-trade result —
-  this doesn't change what it means, only a `hit_stop`/`outcome: "stopped"`
-  row that had hit a target first now also shows a small secondary
-  `(peaked +X% at T1)` note next to it. `furthestHitLabel()` +
-  `peakReturnAtTarget()` in both `app/dashboard/track-record/page.tsx` and
-  `lib/positions-admin.ts` compute this from the same sticky
-  `target1Hit`/`target2Hit`/`target3Hit` flags used above — no new columns,
-  no change to how the final Return or `outcome_locked` themselves are
-  computed. Doesn't show for `target_hit` rows, since their exit price
-  already *is* the furthest target reached.
+- **Return % locks permanently to the furthest target hit, once any target
+  is hit — even if the trade later stops out** (2026-09-11, refined same
+  day). Originally a narrower fix (HBLENGINE, TEJASNET, SBICARD all hit T1
+  while T2/T3 were still open, and the displayed return kept drifting with
+  the live price — even going negative on a retrace — instead of reflecting
+  that T1 had genuinely been reached), then widened per explicit product
+  call: TEJASNET later hit T1, retraced, and stopped out, and the honest
+  closed-trade loss (correct at the time) was still judged to be hiding a
+  real result — a target that's genuinely reached should win over whatever
+  the trade does afterward, full stop, not just while still open.
+  `app/dashboard/track-record/page.tsx`'s `furthestHitTarget()`/
+  `referencePrice()` and `lib/positions-admin.ts`'s `furthestHitTarget()`/
+  `returnPct()` now check the sticky `target1Hit`/`target2Hit`/`target3Hit`
+  flags *first*, ahead of the closed/exit-price check: once any target's
+  been reached, the return is computed against the furthest one hit,
+  period — shown with a 🔒 and a tooltip — regardless of whether the trade
+  is still open, later hit a further target, or later stopped out. Only
+  falls back to the stop's exit price when a trade closes via stop *without*
+  ever having reached a target. Applies automatically to every signal, past
+  and future — no backfill needed, since it's computed live off columns that
+  already existed.
 
 ## 9. Broker order placement (Fyers)
 
