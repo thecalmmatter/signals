@@ -108,12 +108,38 @@ export function daysHeld(openedAt: string | null, closedAt: string | null): numb
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
-// Return since entry, as a %. Open positions use the live quote (undefined
-// if Fyers is down/unconfigured or this symbol has no quote — degrades to
-// null rather than a wrong number). Closed positions use the stored
-// exit_price instead, no live call needed. Flips sign for sell/short.
+// The furthest target actually marked hit so far, if any — null while
+// nothing's been hit yet. Mirrors the same logic on the public track record
+// page (app/dashboard/track-record/page.tsx furthestHitTarget()): only
+// meaningful for a multi-target position, since reaching the sole/furthest
+// target normally closes the position via the "Hit target" button instead.
+function furthestHitTarget(p: AdminPosition): number | null {
+  const hit: number[] = [];
+  if (p.target1HitAt) hit.push(p.targetPrice);
+  if (p.target2HitAt && p.targetPrice2 !== null) hit.push(p.targetPrice2);
+  if (p.target3HitAt && p.targetPrice3 !== null) hit.push(p.targetPrice3);
+  if (hit.length === 0) return null;
+  return p.direction === "sell" ? Math.min(...hit) : Math.max(...hit);
+}
+
+// Return since entry, as a %.
+//   - Closed positions use the stored exit_price, no live call needed.
+//   - Open positions with a target already marked hit (multi-target only —
+//     see furthestHitTarget()) lock to that target's price instead of the
+//     live quote, so the return reflects what was actually achieved instead
+//     of drifting (and potentially going negative) as price retraces past a
+//     level that was genuinely reached.
+//   - Otherwise, the live quote (undefined if Fyers is down/unconfigured or
+//     this symbol has no quote — degrades to null rather than a wrong
+//     number).
+// Flips sign for sell/short in all cases.
 export function returnPct(p: AdminPosition, livePrice: number | undefined): number | null {
-  const current = p.status === "open" ? (livePrice ?? null) : p.exitPrice;
+  let current: number | null;
+  if (p.status !== "open") {
+    current = p.exitPrice;
+  } else {
+    current = furthestHitTarget(p) ?? livePrice ?? null;
+  }
   if (current === null || current === undefined || !p.entryPrice) return null;
   const raw = ((current - p.entryPrice) / p.entryPrice) * 100;
   return p.direction === "sell" ? -raw : raw;

@@ -9,6 +9,13 @@ import {
   returnPct,
 } from "@/lib/positions-admin";
 
+// Mirrors lib/positions-admin.ts's internal furthestHitTarget() — only used
+// here to decide the Return cell's tooltip wording, not the number itself
+// (that's still computed by returnPct()).
+function anyTargetHit(p: AdminPosition): boolean {
+  return Boolean(p.target1HitAt || p.target2HitAt || p.target3HitAt);
+}
+
 const inputCls =
   "w-24 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none transition focus:border-zinc-600";
 
@@ -531,11 +538,18 @@ export default function AdminPositions({
                           ? "no live price (Fyers down/unconfigured, or no quote for this symbol)"
                           : "no exit price logged yet"
                         : r.status === "open"
-                          ? "vs live price"
+                          ? anyTargetHit(r)
+                            ? "locked to the furthest target hit so far — won't drift with the live price until closed"
+                            : "vs live price"
                           : "vs logged exit price"
                     }
                   >
                     {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
+                    {r.status === "open" && anyTargetHit(r) && (
+                      <span className="ml-1 text-zinc-500" aria-hidden="true">
+                        🔒
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 tabular-nums text-zinc-400">{days === null ? "—" : days}</td>
                   <td className="px-3 py-2.5">

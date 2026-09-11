@@ -17,22 +17,48 @@ function daysSince(generatedAt: string): number {
   return Math.max(0, Math.round((Date.now() - start) / 86_400_000));
 }
 
-// The price to judge a trade against: once closed (stopped/target_hit), that
-// is the frozen exit price, never the live quote — the live price keeps
-// drifting after the fact (a "stopped" trade can float back above the stop
-// hours later), which was exactly the confusing bit. Falls back to the live
-// price if a legacy row somehow has no exit price recorded.
+// The furthest target actually reached so far, if any — null while nothing
+// has been hit yet. Only meaningful for a multi-target signal: hitting the
+// sole/furthest target on a single-target signal closes the trade outright
+// (see computeOutcome() in lib/live-signals.ts), so this only ever fires
+// while the trade is still "open" with T2/T3 still ahead of it.
+function furthestHitTarget(s: LiveSignal): number | null {
+  const hit: number[] = [];
+  if (s.target1Hit && s.target !== null) hit.push(s.target);
+  if (s.target2Hit && s.target2 !== null) hit.push(s.target2);
+  if (s.target3Hit && s.target3 !== null) hit.push(s.target3);
+  if (hit.length === 0) return null;
+  return s.signal === "sell" ? Math.min(...hit) : Math.max(...hit);
+}
+
+// The price to judge a trade against:
+//   - Closed (stopped/target_hit): the frozen exit price, never the live
+//     quote — the live price keeps drifting after the fact (a "stopped"
+//     trade can float back above the stop hours later), which was exactly
+//     the confusing bit.
+//   - Still open, but a target has already been reached (only possible on a
+//     multi-target signal — see furthestHitTarget() above): lock to that
+//     target's price instead of the live quote. A target that was genuinely
+//     hit is a real, achieved number; showing the return keep drifting (and
+//     potentially going negative) as price later retraces past it, just
+//     because T2/T3 haven't printed yet, buried the fact that T1 actually
+//     happened.
+//   - Otherwise: the live quote.
+// Falls back to the live price if a legacy closed row somehow has no exit
+// price recorded.
 function referencePrice(s: LiveSignal): number {
   if ((s.outcome === "stopped" || s.outcome === "target_hit") && s.exitPrice !== null) {
     return s.exitPrice;
   }
+  const locked = furthestHitTarget(s);
+  if (locked !== null) return locked;
   return s.price;
 }
 
-// Return since the signal was generated: live price vs entry while open,
-// frozen exit price vs entry once closed — see referencePrice(). null if the
-// signal has no entry price yet (fresh webhook signal an admin hasn't
-// completed) — never fabricated.
+// Return since the signal was generated: locked target/exit price vs entry
+// once something's actually been reached (see referencePrice()), live price
+// vs entry otherwise. null if the signal has no entry price yet (fresh
+// webhook signal an admin hasn't completed) — never fabricated.
 function returnPct(s: LiveSignal): number | null {
   if (s.entry === null || !s.entry) return null;
   const raw = ((referencePrice(s) - s.entry) / s.entry) * 100;
@@ -225,6 +251,7 @@ export default async function TrackRecordPage() {
               {signals.map((s) => {
                 const ret = returnPct(s);
                 const closed = s.outcome === "stopped" || s.outcome === "target_hit";
+                const lockedAt = closed ? null : furthestHitTarget(s);
                 const stockDetails = stockMap.get(s.symbol) ?? null;
                 const hasResearch = stockDetails !== null;
                 const score = convictionScore(s, stockDetails);
@@ -291,8 +318,18 @@ export default async function TrackRecordPage() {
                       className={`px-3 py-2.5 font-medium tabular-nums ${
                         ret === null ? "text-zinc-600" : ret >= 0 ? "text-emerald-400" : "text-red-400"
                       }`}
+                      title={
+                        lockedAt !== null
+                          ? `Locked at ${inr(lockedAt)} — the furthest target reached so far. Trade is still open toward the remaining target(s); this won't drift with the live price.`
+                          : undefined
+                      }
                     >
                       {ret === null ? "—" : `${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`}
+                      {lockedAt !== null && (
+                        <span className="ml-1 text-zinc-500" aria-hidden="true">
+                          🔒
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-400">{daysSince(s.generatedAt)}</td>
                   </tr>

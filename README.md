@@ -215,6 +215,21 @@ source of truth for a future win-rate / statistical-edge report.
   `upsertPositionFromSignal` (`lib/positions-admin.ts`) is called from
   `POST /api/signals` and `PATCH /api/signals/[id]` — it never blocks the
   signal write if it fails (e.g. migration not applied yet).
+- **Return % locks to the furthest target hit, not the live price, on a
+  still-open multi-target trade** (bug fix, 2026-09-11 — HBLENGINE,
+  TEJASNET, SBICARD all hit T1 while T2/T3 were still open, and the
+  displayed return kept drifting with the live price — even going negative
+  on a retrace — instead of reflecting that T1 had genuinely been reached).
+  `app/dashboard/track-record/page.tsx`'s `referencePrice()` and
+  `lib/positions-admin.ts`'s `returnPct()` now check the sticky
+  `target1Hit`/`target2Hit`/`target3Hit` flags first: if any target's been
+  reached and the trade isn't fully closed yet, the return is computed
+  against the furthest one hit (not the live quote), shown with a 🔒 and a
+  tooltip explaining why. Only ever applies to a multi-target signal —
+  hitting the sole/furthest target on a single-target signal already closes
+  the trade outright (see `computeOutcome()`), so this doesn't change
+  anything for those. Applies automatically to every future signal, not
+  just these three.
 
 ## 9. Broker order placement (Fyers)
 
