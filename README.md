@@ -230,6 +230,20 @@ source of truth for a future win-rate / statistical-edge report.
   the trade outright (see `computeOutcome()`), so this doesn't change
   anything for those. Applies automatically to every future signal, not
   just these three.
+- **"Peaked at TX" note for a trade that hit a target and later stopped out**
+  (refinement, 2026-09-11 — TEJASNET hit T1 on 2026-09-04, then retraced and
+  got stopped out on 2026-09-11; the honest closed-trade Return correctly
+  showed the real loss, but that alone hid the fact T1 had genuinely been
+  reached). The final Return still shows the honest closed-trade result —
+  this doesn't change what it means, only a `hit_stop`/`outcome: "stopped"`
+  row that had hit a target first now also shows a small secondary
+  `(peaked +X% at T1)` note next to it. `furthestHitLabel()` +
+  `peakReturnAtTarget()` in both `app/dashboard/track-record/page.tsx` and
+  `lib/positions-admin.ts` compute this from the same sticky
+  `target1Hit`/`target2Hit`/`target3Hit` flags used above — no new columns,
+  no change to how the final Return or `outcome_locked` themselves are
+  computed. Doesn't show for `target_hit` rows, since their exit price
+  already *is* the furthest target reached.
 
 ## 9. Broker order placement (Fyers)
 

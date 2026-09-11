@@ -7,6 +7,8 @@ import {
   STATUS_LABEL,
   daysHeld,
   returnPct,
+  peakReturnAtTarget,
+  furthestHitLabel,
 } from "@/lib/positions-admin";
 
 // Mirrors lib/positions-admin.ts's internal furthestHitTarget() — only used
@@ -444,6 +446,10 @@ export default function AdminPositions({
               const closed = r.status !== "open";
               const ret = returnPct(r, livePrices[r.symbol]);
               const days = daysHeld(r.openedAt, r.closedAt);
+              // Only a hit_stop position needs the "peaked at" note — hit_target's
+              // exit price already is the furthest target hit.
+              const peak = r.status === "hit_stop" ? peakReturnAtTarget(r) : null;
+              const peakLabel = peak !== null ? furthestHitLabel(r) : null;
               return (
                 <tr key={r.id} className={`bg-zinc-950 transition ${closed ? "opacity-80" : ""}`}>
                   <td className="px-3 py-2.5">
@@ -548,6 +554,15 @@ export default function AdminPositions({
                     {r.status === "open" && anyTargetHit(r) && (
                       <span className="ml-1 text-zinc-500" aria-hidden="true">
                         🔒
+                      </span>
+                    )}
+                    {peakLabel !== null && peak !== null && (
+                      <span
+                        className="ml-1.5 text-[11px] font-normal text-zinc-500"
+                        title={`Reached +${peak.toFixed(1)}% at ${peakLabel} before the stop was hit — price later retraced and stopped out, so the return above reflects that honest loss.`}
+                      >
+                        (peaked {peak >= 0 ? "+" : ""}
+                        {peak.toFixed(1)}% at {peakLabel})
                       </span>
                     )}
                   </td>

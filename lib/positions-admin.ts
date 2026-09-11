@@ -145,6 +145,28 @@ export function returnPct(p: AdminPosition, livePrice: number | undefined): numb
   return p.direction === "sell" ? -raw : raw;
 }
 
+// Which target label (T1/T2/T3) corresponds to furthestHitTarget() — for
+// display only. Mirrors the identical helper on the public track record page
+// (app/dashboard/track-record/page.tsx furthestHitLabel()).
+export function furthestHitLabel(p: AdminPosition): string | null {
+  if (p.target3HitAt && p.targetPrice3 !== null) return "T3";
+  if (p.target2HitAt && p.targetPrice2 !== null) return "T2";
+  if (p.target1HitAt) return "T1";
+  return null;
+}
+
+// The return actually achieved when the furthest target was hit, regardless
+// of what happened afterward — for a "hit_stop" position that reached a
+// target before the stop, so its true final return() (correctly, the honest
+// stop-out loss) doesn't silently hide that a target was genuinely reached.
+// Mirrors peakReturnAtTarget() on the public track record page.
+export function peakReturnAtTarget(p: AdminPosition): number | null {
+  const locked = furthestHitTarget(p);
+  if (locked === null || !p.entryPrice) return null;
+  const raw = ((locked - p.entryPrice) / p.entryPrice) * 100;
+  return p.direction === "sell" ? -raw : raw;
+}
+
 /**
  * Live price per open position's symbol, for the "return since entry"
  * column — closed positions use their stored exit_price instead, no live

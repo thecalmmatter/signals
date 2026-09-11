@@ -40,3 +40,14 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+.agents/
+
+# scratch / one-off analysis files, not part of the app
+__pycache__/
+*.pyc
+/modal_demo.py
+/kimi_model_details.txt
+/reddit-honest-feedback-post.md
+/reseller-competitor-analysis.md
+/scripts/factor_rank.py
+/scripts/fundamentals_test.py

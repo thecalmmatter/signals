@@ -31,6 +31,34 @@ function furthestHitTarget(s: LiveSignal): number | null {
   return s.signal === "sell" ? Math.min(...hit) : Math.max(...hit);
 }
 
+// Which target label (T1/T2/T3) corresponds to furthestHitTarget() above —
+// for display only ("peaked +8.1% at T1"). Picks the highest-numbered target
+// that's been hit, which lines up with furthestHitTarget()'s furthest-price
+// pick as long as a signal's own targets are monotonic by direction (T2
+// further than T1, T3 further than T2) — true for every signal this app
+// generates.
+function furthestHitLabel(s: LiveSignal): string | null {
+  if (s.target3Hit && s.target3 !== null) return "T3";
+  if (s.target2Hit && s.target2 !== null) return "T2";
+  if (s.target1Hit && s.target !== null) return "T1";
+  return null;
+}
+
+// The return that was actually achieved when the furthest target got hit,
+// regardless of what happened afterward. Only meaningful for a trade that
+// later got stopped out after reaching a target first (e.g. TEJASNET: hit T1,
+// retraced, later stopped) — the final Return column correctly shows the
+// honest closed-trade loss, but that alone hides the fact that a target was
+// genuinely reached along the way. Shown as a secondary "(peaked +X% at T1)"
+// note next to the final Return, never in place of it.
+function peakReturnAtTarget(s: LiveSignal): number | null {
+  if (s.entry === null || !s.entry) return null;
+  const locked = furthestHitTarget(s);
+  if (locked === null) return null;
+  const raw = ((locked - s.entry) / s.entry) * 100;
+  return s.signal === "sell" ? -raw : raw;
+}
+
 // The price to judge a trade against:
 //   - Closed (stopped/target_hit): the frozen exit price, never the live
 //     quote — the live price keeps drifting after the fact (a "stopped"
@@ -252,6 +280,11 @@ export default async function TrackRecordPage() {
                 const ret = returnPct(s);
                 const closed = s.outcome === "stopped" || s.outcome === "target_hit";
                 const lockedAt = closed ? null : furthestHitTarget(s);
+                // Only a stopped-out trade needs the "peaked at" note — a
+                // target_hit trade's exit price already *is* the furthest
+                // target, so ret and the peak are the same number.
+                const peak = s.outcome === "stopped" ? peakReturnAtTarget(s) : null;
+                const peakLabel = peak !== null ? furthestHitLabel(s) : null;
                 const stockDetails = stockMap.get(s.symbol) ?? null;
                 const hasResearch = stockDetails !== null;
                 const score = convictionScore(s, stockDetails);
@@ -328,6 +361,15 @@ export default async function TrackRecordPage() {
                       {lockedAt !== null && (
                         <span className="ml-1 text-zinc-500" aria-hidden="true">
                           🔒
+                        </span>
+                      )}
+                      {peakLabel !== null && peak !== null && (
+                        <span
+                          className="ml-1.5 text-[11px] font-normal text-zinc-500"
+                          title={`Reached ${inr(furthestHitTarget(s)!)} at ${peakLabel} before the stop was hit — price later retraced and stopped out, so the final return above reflects that honest loss, not the ${peak >= 0 ? "+" : ""}${peak.toFixed(1)}% that was actually touched.`}
+                        >
+                          (peaked {peak >= 0 ? "+" : ""}
+                          {peak.toFixed(1)}% at {peakLabel})
                         </span>
                       )}
                     </td>
