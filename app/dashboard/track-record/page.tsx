@@ -1,7 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { loadLiveSignals, type LiveSignal } from "@/lib/live-signals";
+import {
+  loadLiveSignals,
+  furthestHitTarget,
+  returnPct,
+  type LiveSignal,
+} from "@/lib/live-signals";
 import { getCachedStockDetailsBatch } from "@/lib/stock-analytics-cache";
 import { convictionScore, type ConvictionScore } from "@/lib/conviction-score";
 import { resolveCustomerTenant } from "@/lib/tenants";
@@ -15,51 +20,6 @@ const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigi
 function daysSince(generatedAt: string): number {
   const start = new Date(generatedAt).getTime();
   return Math.max(0, Math.round((Date.now() - start) / 86_400_000));
-}
-
-// The furthest target actually reached so far, if any — null while nothing
-// has been hit yet. Once a target is hit this is permanent (sticky
-// target1Hit/target2Hit/target3Hit flags, see lib/live-signals.ts): it stays
-// the reference price even if the trade later closes via stop, since the
-// user's explicit call is "the target reached wins, always" — a genuinely
-// hit target is a real, achieved number and shouldn't be erased by what the
-// trade does afterward.
-function furthestHitTarget(s: LiveSignal): number | null {
-  const hit: number[] = [];
-  if (s.target1Hit && s.target !== null) hit.push(s.target);
-  if (s.target2Hit && s.target2 !== null) hit.push(s.target2);
-  if (s.target3Hit && s.target3 !== null) hit.push(s.target3);
-  if (hit.length === 0) return null;
-  return s.signal === "sell" ? Math.min(...hit) : Math.max(...hit);
-}
-
-// The price to judge a trade against:
-//   - Any target ever reached (see furthestHitTarget() above): locks to that
-//     target's price, permanently — even if the trade later stops out. A
-//     target that was genuinely hit doesn't un-happen because price
-//     retraced afterward.
-//   - No target ever hit, but closed (stopped): the frozen exit price, never
-//     the live quote — the live price keeps drifting after the fact.
-//   - Otherwise: the live quote.
-// Falls back to the live price if a legacy closed row somehow has no exit
-// price recorded.
-function referencePrice(s: LiveSignal): number {
-  const locked = furthestHitTarget(s);
-  if (locked !== null) return locked;
-  if ((s.outcome === "stopped" || s.outcome === "target_hit") && s.exitPrice !== null) {
-    return s.exitPrice;
-  }
-  return s.price;
-}
-
-// Return since the signal was generated: locked target/exit price vs entry
-// once something's actually been reached (see referencePrice()), live price
-// vs entry otherwise. null if the signal has no entry price yet (fresh
-// webhook signal an admin hasn't completed) — never fabricated.
-function returnPct(s: LiveSignal): number | null {
-  if (s.entry === null || !s.entry) return null;
-  const raw = ((referencePrice(s) - s.entry) / s.entry) * 100;
-  return s.signal === "sell" ? -raw : raw;
 }
 
 function ScoreCell({ score, hasResearch }: { score: ConvictionScore; hasResearch: boolean }) {
@@ -165,12 +125,21 @@ export default async function TrackRecordPage() {
             </span>
             <span className="text-sm font-semibold tracking-tight">{tenant.brandName}</span>
           </div>
-          <Link
-            href="/dashboard"
-            className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-          >
-            ← Signal feed
-          </Link>
+          <div className="flex items-center gap-4">
+            <a
+              href="/api/track-record/download"
+              download
+              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+            >
+              Download tradebook ⤓
+            </a>
+            <Link
+              href="/dashboard"
+              className="text-sm text-zinc-400 transition-colors hover:text-zinc-100"
+            >
+              ← Signal feed
+            </Link>
+          </div>
         </div>
       </header>
 

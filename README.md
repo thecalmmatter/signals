@@ -225,8 +225,9 @@ source of truth for a future win-rate / statistical-edge report.
   closed-trade loss (correct at the time) was still judged to be hiding a
   real result — a target that's genuinely reached should win over whatever
   the trade does afterward, full stop, not just while still open.
-  `app/dashboard/track-record/page.tsx`'s `furthestHitTarget()`/
-  `referencePrice()` and `lib/positions-admin.ts`'s `furthestHitTarget()`/
+  `lib/live-signals.ts`'s `furthestHitTarget()`/`referencePrice()`/
+  `returnPct()` (shared by the track record page and the tradebook CSV
+  export below) and `lib/positions-admin.ts`'s own `furthestHitTarget()`/
   `returnPct()` now check the sticky `target1Hit`/`target2Hit`/`target3Hit`
   flags *first*, ahead of the closed/exit-price check: once any target's
   been reached, the return is computed against the furthest one hit,
@@ -236,6 +237,15 @@ source of truth for a future win-rate / statistical-edge report.
   ever having reached a target. Applies automatically to every signal, past
   and future — no backfill needed, since it's computed live off columns that
   already existed.
+- **"Download tradebook" CSV export** (2026-09-13) —
+  `GET /api/track-record/download`, auth-gated the same as the track record
+  page (any signed-in customer, tenant-scoped via `resolveCustomerTenant`).
+  Flattens the exact same signals + return calc shown on screen (symbol,
+  direction, outcome, entry/T1/T2/T3/stop with per-target hit flags,
+  reference price + basis, return %, days) into a `text/csv` attachment.
+  Linked from a "Download tradebook ⤓" link in the track record page header.
+  No new table or stored export — generated fresh from `loadLiveSignals()`
+  on every request.
 
 ## 9. Broker order placement (Fyers)
 

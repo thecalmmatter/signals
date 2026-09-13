@@ -145,6 +145,47 @@ export type LiveSignal = {
   generatedAt: string;
 };
 
+// The furthest target actually reached so far, if any — null while nothing
+// has been hit yet. Once a target is hit this is permanent (sticky
+// target1Hit/target2Hit/target3Hit flags above): it stays the reference
+// price even if the trade later closes via stop — a genuinely hit target is
+// a real, achieved number and doesn't get erased by what the trade does
+// afterward. Shared by the track record page and the tradebook CSV export
+// (app/api/track-record/download/route.ts) so both agree on the same number.
+export function furthestHitTarget(s: LiveSignal): number | null {
+  const hit: number[] = [];
+  if (s.target1Hit && s.target !== null) hit.push(s.target);
+  if (s.target2Hit && s.target2 !== null) hit.push(s.target2);
+  if (s.target3Hit && s.target3 !== null) hit.push(s.target3);
+  if (hit.length === 0) return null;
+  return s.signal === "sell" ? Math.min(...hit) : Math.max(...hit);
+}
+
+// The price to judge a trade against:
+//   - Any target ever reached (see furthestHitTarget() above): locks to that
+//     target's price, permanently — even if the trade later stops out.
+//   - No target ever hit, but closed (stopped): the frozen exit price, never
+//     the live quote — the live price keeps drifting after the fact.
+//   - Otherwise: the live quote.
+export function referencePrice(s: LiveSignal): number {
+  const locked = furthestHitTarget(s);
+  if (locked !== null) return locked;
+  if ((s.outcome === "stopped" || s.outcome === "target_hit") && s.exitPrice !== null) {
+    return s.exitPrice;
+  }
+  return s.price;
+}
+
+// Return since the signal was generated: locked target/exit price vs entry
+// once something's actually been reached (see referencePrice()), live price
+// vs entry otherwise. null if the signal has no entry price yet — never
+// fabricated.
+export function returnPct(s: LiveSignal): number | null {
+  if (s.entry === null || !s.entry) return null;
+  const raw = ((referencePrice(s) - s.entry) / s.entry) * 100;
+  return s.signal === "sell" ? -raw : raw;
+}
+
 // Shared across every caller within a server instance's lifetime (every
 // signed-in user's ticker polls every 10s, plus the track record page) —
 // cache briefly so we're not hammering Fyers once per request. Keyed by the
