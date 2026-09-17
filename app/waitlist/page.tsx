@@ -1,4 +1,5 @@
 import { WaitlistForm } from "@/components/waitlist-form";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 export const metadata = {
   title: "Get tomorrow's setup — Signals",
@@ -109,8 +110,8 @@ export default async function WaitlistPage({
         </div>
       </main>
 
-      <footer className="border-t border-zinc-800/60 py-6 text-center text-xs text-zinc-600">
-        Signals — dummy data, no real trading advice.
+      <footer className="border-t border-zinc-800/60 px-6 py-6 text-center text-xs text-zinc-600">
+        {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}
       </footer>
     </div>
   );

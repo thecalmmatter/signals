@@ -11,6 +11,7 @@ import { getCachedStockDetailsBatch } from "@/lib/stock-analytics-cache";
 import { convictionScore, type ConvictionScore } from "@/lib/conviction-score";
 import { resolveCustomerTenant } from "@/lib/tenants";
 import { SymbolLink } from "@/components/symbol-link";
+import { DisclaimerBanner } from "@/components/disclaimer-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -165,6 +166,8 @@ export default async function TrackRecordPage() {
             </p>
           )}
         </div>
+
+        <DisclaimerBanner tenant={tenant} />
 
         <div className="mb-6 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">

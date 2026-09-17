@@ -17,6 +17,24 @@ quote/candle lookup) hasn't been verified — if they don't, this copy is
 ahead of the product. Verify before repeating this coverage claim anywhere
 external (ads, Product Hunt, etc.).
 
+**Regulatory disclaimer (2026-09-17, critical):** `lib/disclaimer.ts` is the
+single source of truth for the "educational purposes only, not a buy/sell
+recommendation, not SEBI-registered" disclaimer, shown on every page that
+displays a live entry/target/stop call: `/dashboard`
+(`components/disclaimer-banner.tsx`), `/dashboard/track-record` (same
+banner), the signal detail modal (`components/signal-detail-modal.tsx`,
+generic wording — not tenant-aware yet, see its inline comment), the stock
+analytics pane (`components/stock-analytics-pane.tsx`), the main landing
+page, `/waitlist`, `/launch`, and the Telegram lead bot's auto-reply. A
+tenant with `sebi_reg_name`/`sebi_reg_number` set gets different wording
+(asserting *their* registration) — only set those columns for a tenant
+whose registration you've actually confirmed yourself; the code doesn't
+verify it. **This is not legal advice** — the wording is a reasonable-effort
+plain-English disclaimer, not something checked against SEBI's actual
+Research Analyst/Investment Adviser regulations by a lawyer. Get it
+reviewed by a securities lawyer before relying on it, especially before
+`BILLING_ENABLED` goes on or a second (paid) tenant onboards.
+
 ## Stack
 
 - **Framework:** Next.js 16 (Turbopack) + React 19 + Tailwind CSS v4

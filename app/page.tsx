@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Ticker } from "@/components/ticker";
 import { LandingParticleCanvas } from "@/components/landing-particle-canvas";
 import { STOCKS } from "@/lib/stocks";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 const PLANS = [
   {
@@ -465,7 +466,10 @@ export default function Home() {
 
       <footer className="border-t border-zinc-800/60">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-xs text-zinc-500 sm:flex-row">
-          <p>Signals — dummy data, no real trading advice.</p>
+          <p className="max-w-xl text-center sm:text-left">
+            {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)} The preview above uses sample data
+            for signed-out visitors, not the live feed.
+          </p>
           <div className="flex items-center gap-5">
             <a href="#ticker" className="transition-colors hover:text-zinc-300">
               Live feed

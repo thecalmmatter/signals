@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toneOf, type TickerStock } from "@/lib/stocks";
 import { TONES } from "@/lib/tone-styles";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 const inr = (n: number) =>
   `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
@@ -502,6 +503,16 @@ export function SignalDetailModal({
           ) : (
             <AskBar stock={stock} rsi={state.status === "ready" ? state.data.rsi : null} />
           )}
+
+          {/* Generic (not tenant-aware) — this modal doesn't currently
+              receive the signed-in customer's tenant/brand, unlike
+              app/dashboard/page.tsx and the track record page (see
+              components/disclaimer-banner.tsx). Fine for the single-operator
+              instance today; revisit if a second, differently-branded
+              tenant's customers see this modal. See lib/disclaimer.ts. */}
+          <p className="mt-3 border-t border-zinc-800 pt-3 text-[11px] leading-4 text-zinc-600">
+            {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}
+          </p>
         </div>
       </div>
     </div>

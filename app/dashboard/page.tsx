@@ -4,6 +4,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { Ticker } from "@/components/ticker";
 import { Paywall } from "@/components/paywall";
+import { DisclaimerBanner } from "@/components/disclaimer-banner";
 import { STOCKS } from "@/lib/stocks";
 import { getAccessStatus } from "@/lib/access";
 import { ensureUserRecord } from "@/lib/users";
@@ -82,6 +83,8 @@ export default async function DashboardPage() {
             into your track record.
           </p>
         </div>
+
+        <DisclaimerBanner tenant={tenant} />
 
         {access.allowed ? (
           <Ticker fallback={STOCKS} live />

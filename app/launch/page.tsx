@@ -4,6 +4,7 @@ import { LandingParticleCanvas } from "@/components/landing-particle-canvas";
 import { WaitlistForm } from "@/components/waitlist-form";
 import { STOCKS } from "@/lib/stocks";
 import { getResultsChannelUrl } from "@/lib/telegram-results";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 // Skeptical, cold Product Hunt traffic is exactly who a public, unfiltered
 // track record is for — a lower-friction proof point than "just trust the
@@ -67,7 +68,7 @@ const WHY = [
 const FAQ = [
   {
     q: "Is this investment advice?",
-    a: "No. Signals publishes a technical setup format (entry, target, stop) — it isn't personalized financial advice, and I'm not a registered investment advisor. Trade your own risk.",
+    a: "No. Signals publishes a technical setup format (entry, target, stop) for educational purposes — it isn't personalized financial advice, and I'm not registered with SEBI as an Investment Adviser or Research Analyst. Trade your own risk.",
   },
   {
     q: "What's the track record?",
@@ -274,7 +275,9 @@ export default function LaunchPage() {
 
       <footer className="border-t border-zinc-800/60">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-xs text-zinc-500 sm:flex-row">
-          <p>Signals — a solo-built, early-stage product. Not financial advice.</p>
+          <p className="max-w-xl text-center sm:text-left">
+            A solo-built, early-stage product. {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}
+          </p>
           <div className="flex items-center gap-5">
             <a href="#why" className="transition-colors hover:text-zinc-300">
               Why

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { sendLeadsBotMessage } from "@/lib/telegram-leads";
 import { getResultsChannelUrl } from "@/lib/telegram-results";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ function welcomeText(): string {
     "Signals publishes swing setups across large, mid and small caps, NSE and BSE — entry, target, stop, one clean card. " +
     "Free during the public dry run, no card needed.\n\n" +
     `${signupLine}${channelLine}\n\n` +
-    "(Not financial advice — a technical setup format, trade your own risk.)"
+    `(${disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)})`
   );
 }
 

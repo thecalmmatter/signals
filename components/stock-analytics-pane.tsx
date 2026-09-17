@@ -16,6 +16,7 @@ import type { LiveSignal } from "@/lib/live-signals";
 import type { StockDetails, CorporateActionData } from "@/lib/indian-stock-api";
 import { STOCK_ANALYTICS_POPULATING_MESSAGE } from "@/lib/stock-analytics-messages";
 import { convictionScore, recoCounts, latestShareholdingPct } from "@/lib/conviction-score";
+import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })}`;
 
@@ -260,6 +261,10 @@ export function StockAnalyticsPane({
             )}
           </div>
         </div>
+
+        <p className="mt-6 max-w-3xl text-[11px] leading-4 text-zinc-600">
+          {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}
+        </p>
       </div>
     </div>
   );
