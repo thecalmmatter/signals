@@ -1,9 +1,9 @@
 import { WaitlistForm } from "@/components/waitlist-form";
 
 export const metadata = {
-  title: "Get tomorrow's signal — Signals",
+  title: "Get tomorrow's setup — Signals",
   description:
-    "One swing setup, delivered before the market opens. Entry, target, stop, and the RSI cascade behind it. Free to join.",
+    "One high-conviction swing setup, delivered before the market opens — across large, mid and small caps, NSE and BSE. Entry, target, stop, and the RSI cascade behind it. Free to join.",
 };
 
 const EXAMPLE = {
@@ -45,15 +45,16 @@ export default async function WaitlistPage({
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
           </span>
-          Swing signals on Indian large-caps
+          Large · mid · small cap · NSE &amp; BSE
         </p>
 
         <h1 className="mx-auto mt-6 max-w-xl text-4xl font-semibold leading-tight tracking-tight text-zinc-50 md:text-5xl md:leading-[1.05]">
-          Get tomorrow&apos;s signal
+          Get tomorrow&apos;s snowball
         </h1>
         <p className="mx-auto mt-4 max-w-md text-base leading-7 text-zinc-400">
-          One swing setup a day — entry, target, stop, and why. Join free and
-          get the next one before the market opens.
+          One high-conviction setup a day, across the whole market — entry,
+          target, stop, and why. Join free and get the next one before the
+          market opens.
         </p>
 
         <div className="mt-10 w-full">

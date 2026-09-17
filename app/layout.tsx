@@ -21,9 +21,9 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Signals — Swing trade signals for Indian markets",
+  title: "Signals — Build the portfolio, not just the trade",
   description:
-    "A nightly scan surfaces high-conviction swing setups on Indian large-caps. Entry, target, stop — no indicators to interpret.",
+    "A nightly scan surfaces high-conviction swing setups across large, mid and small caps, NSE and BSE. Entry, target, stop — logged in the open, so the portfolio and the edge compound together.",
 };
 
 // Speculation Rules API — lets Chromium browsers speculatively prefetch/

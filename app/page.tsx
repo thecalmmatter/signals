@@ -70,7 +70,7 @@ const COMPLEXITY = [
 const STEPS = [
   {
     title: "Nightly screener scan",
-    body: "A screener runs across NSE large-caps after market close and flags stocks matching a defined technical setup.",
+    body: "A screener runs across large, mid and small caps on NSE and BSE after market close and flags stocks matching a defined technical setup.",
   },
   {
     title: "Mapped scans publish, the rest queue for review",
@@ -158,19 +158,21 @@ export default function Home() {
               </span>
               SWING SIGNALS, PUBLISHED NIGHTLY
               <span className="text-zinc-600">|</span>
-              <span className="text-zinc-400">NSE LARGE-CAPS</span>
+              <span className="text-zinc-400">LARGE · MID · SMALL CAP · NSE &amp; BSE</span>
             </p>
             <h1 className="mx-auto mt-6 max-w-2xl text-4xl font-normal leading-tight tracking-tight text-zinc-50 md:text-6xl md:leading-[1.05]">
-              Know the signal.
+              Every fortune starts as
               <br />
               <span className="font-serif italic editorial-gradient-text">
-                Skip the noise.
+                a snowball, not an avalanche.
               </span>
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-zinc-400 md:text-lg">
-              A nightly scan surfaces high-conviction swing setups on Indian
-              large-caps. Every setup lands as one clean card — entry, target,
-              stop. Nothing to interpret.
+              A nightly scan surfaces one high-conviction swing setup at a
+              time — across large, mid and small caps, NSE and BSE. Every
+              call is logged, entry to exit, in the open. Not a tip you buy
+              and forget: a portfolio and an edge you&rsquo;re rolling
+              forward, call by call.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
@@ -326,7 +328,8 @@ export default function Home() {
               Every position posted publicly is logged the moment it&rsquo;s
               made: symbol, direction, entry, target, stop, and how it closed.
               As that history builds, it&rsquo;ll be shown here in full, wins
-              and losses both.
+              and losses both — this ledger is the snowball, and it only
+              rolls forward in the open.
             </p>
             <div className="mt-8 max-w-xl glass-panel rounded-2xl p-6">
               <div className="mb-3 flex items-center gap-2">
@@ -435,14 +438,15 @@ export default function Home() {
           <div className="mx-auto w-full max-w-6xl px-6 py-20 text-center md:py-24">
             <div className="glass-panel mx-auto max-w-2xl rounded-3xl px-8 py-12 sm:px-12 sm:py-16">
               <h2 className="mx-auto max-w-xl text-2xl font-normal tracking-tight text-zinc-50 md:text-4xl">
-                Your next swing is{" "}
+                Your next snowball is{" "}
                 <span className="font-serif italic text-emerald-300">
                   already forming.
                 </span>
               </h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-zinc-400">
-                New setups land as the nightly scan completes. No charts to
-                babysit.
+                New setups land across large, mid and small caps as the
+                nightly scan completes. No charts to babysit — just one more
+                call, logged in the open, added to the pile.
               </p>
               <Link
                 href="/signup"

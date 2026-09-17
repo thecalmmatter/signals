@@ -36,7 +36,7 @@ function welcomeText(): string {
 
   return (
     "Thanks for stopping by 👋\n\n" +
-    "Signals publishes swing setups on NSE large-caps — entry, target, stop, one clean card. " +
+    "Signals publishes swing setups across large, mid and small caps, NSE and BSE — entry, target, stop, one clean card. " +
     "Free during the public dry run, no card needed.\n\n" +
     `${signupLine}${channelLine}\n\n` +
     "(Not financial advice — a technical setup format, trade your own risk.)"

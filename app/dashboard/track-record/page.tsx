@@ -147,7 +147,7 @@ export default async function TrackRecordPage() {
         <div className="mb-8">
           <p className="font-mono text-xs uppercase tracking-widest text-sky-400">Track record</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">
-            Every live signal, wins and losses both.
+            The snowball, call by call — wins and losses both.
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
             This tracks exactly what&rsquo;s live in the signal feed right now — nothing suppressed,

@@ -74,10 +74,12 @@ export default async function DashboardPage() {
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12 md:py-16">
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 md:text-3xl">
-            Your live signal feed
+            Your live feed
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Refreshed automatically every 10 seconds from the signals database.
+            Large, mid and small caps, NSE and BSE. Refreshed automatically
+            every 10 seconds — each call here is one more snowball rolling
+            into your track record.
           </p>
         </div>
 

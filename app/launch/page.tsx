@@ -14,9 +14,9 @@ import { getResultsChannelUrl } from "@/lib/telegram-results";
 const CHANNEL_URL = getResultsChannelUrl();
 
 export const metadata = {
-  title: "Signals on Product Hunt — swing setups for NSE large-caps",
+  title: "Signals on Product Hunt — build the portfolio, not just the trade",
   description:
-    "A nightly scan surfaces high-conviction swing setups on Indian large-caps. Every signal is one clean card — entry, target, stop. Free during the public dry run.",
+    "A nightly scan surfaces high-conviction swing setups across large, mid and small caps, NSE and BSE. Every signal is one clean card — entry, target, stop. Free during the public dry run.",
 };
 
 // TODO once the Product Hunt listing is live: replace this with the real
@@ -137,14 +137,15 @@ export default function LaunchPage() {
             </p>
 
             <h1 className="mx-auto mt-6 max-w-2xl text-4xl font-normal leading-tight tracking-tight text-zinc-50 md:text-6xl md:leading-[1.05]">
-              Know the signal.
+              Every fortune starts as
               <br />
-              <span className="font-serif italic editorial-gradient-text">Skip the noise.</span>
+              <span className="font-serif italic editorial-gradient-text">a snowball, not an avalanche.</span>
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-zinc-400 md:text-lg">
-              A nightly scan surfaces high-conviction swing setups on Indian
-              large-caps. Every setup lands as one clean card — entry, target,
-              stop. Built solo, out of my own trading.
+              A nightly scan surfaces high-conviction swing setups across
+              large, mid and small caps, NSE and BSE. Every setup lands as
+              one clean card — entry, target, stop. Built solo, out of my
+              own trading.
             </p>
 
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">

@@ -323,7 +323,7 @@ export function Ticker({ fallback, live = false, max }: TickerProps) {
               {live && source === "loading" && "Connecting…"}
             </p>
             <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-50 md:text-2xl">
-              Swing signals on Indian large-caps
+              Swing setups, large to small cap, NSE &amp; BSE
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
               {!live

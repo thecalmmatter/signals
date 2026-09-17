@@ -4,6 +4,19 @@ A Next.js signals dashboard that ingests Chartlink screener alerts via a webhook
 shows them on a live customer feed, and gives the owner an admin panel to approve,
 edit, or suppress signals. Uses Clerk for auth and a Neon (Postgres) database.
 
+**Positioning (2026-09-17):** not framed as "just another signal app" — the
+public-facing copy (landing page, dashboard, track record, waitlist) now
+leads with a "build the portfolio, not just the trade" / snowball-compounding
+narrative, and coverage language was widened from "NSE large-caps" to
+"large, mid and small cap, NSE and BSE" everywhere it appeared. This is a
+**messaging-only** change — nothing about how signals are ingested, which
+exchange/segment Chartlink or Fyers actually cover, or the underlying data
+pipeline was touched. **Caveat:** whether BSE symbols and mid/small-cap
+names actually flow end-to-end today (Chartlink scan → webhook → Fyers
+quote/candle lookup) hasn't been verified — if they don't, this copy is
+ahead of the product. Verify before repeating this coverage claim anywhere
+external (ads, Product Hunt, etc.).
+
 ## Stack
 
 - **Framework:** Next.js 16 (Turbopack) + React 19 + Tailwind CSS v4
