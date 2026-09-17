@@ -3,6 +3,7 @@ import { Ticker } from "@/components/ticker";
 import { LandingParticleCanvas } from "@/components/landing-particle-canvas";
 import { STOCKS } from "@/lib/stocks";
 import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
+import { SUBSTACK_URL } from "@/lib/links";
 
 const PLANS = [
   {
@@ -125,6 +126,14 @@ export default function Home() {
             </a>
             <a href="#pricing" className="transition-colors hover:text-zinc-100">
               Pricing
+            </a>
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-zinc-100"
+            >
+              Newsletter
             </a>
           </nav>
           <div className="flex items-center gap-3">
@@ -476,6 +485,14 @@ export default function Home() {
             </a>
             <a href="#pricing" className="transition-colors hover:text-zinc-300">
               Pricing
+            </a>
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-zinc-300"
+            >
+              Newsletter
             </a>
             <Link href="/signup" className="transition-colors hover:text-zinc-300">
               Sign up

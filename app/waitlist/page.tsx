@@ -1,5 +1,6 @@
 import { WaitlistForm } from "@/components/waitlist-form";
 import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
+import { SUBSTACK_URL } from "@/lib/links";
 
 export const metadata = {
   title: "Get tomorrow's setup — Signals",
@@ -111,7 +112,15 @@ export default async function WaitlistPage({
       </main>
 
       <footer className="border-t border-zinc-800/60 px-6 py-6 text-center text-xs text-zinc-600">
-        {disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}
+        <p>{disclaimerFooterText(DEFAULT_DISCLAIMER_TENANT)}</p>
+        <a
+          href={SUBSTACK_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-block text-zinc-400 underline decoration-zinc-700 underline-offset-2 transition-colors hover:text-zinc-200"
+        >
+          Read the newsletter
+        </a>
       </footer>
     </div>
   );

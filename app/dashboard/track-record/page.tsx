@@ -12,6 +12,7 @@ import { convictionScore, type ConvictionScore } from "@/lib/conviction-score";
 import { resolveCustomerTenant } from "@/lib/tenants";
 import { SymbolLink } from "@/components/symbol-link";
 import { DisclaimerBanner } from "@/components/disclaimer-banner";
+import { SUBSTACK_URL } from "@/lib/links";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,14 @@ export default async function TrackRecordPage() {
             <span className="text-sm font-semibold tracking-tight">{tenant.brandName}</span>
           </div>
           <div className="flex items-center gap-4">
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
+            >
+              Newsletter
+            </a>
             <a
               href="/api/track-record/download"
               download

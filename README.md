@@ -35,6 +35,20 @@ Research Analyst/Investment Adviser regulations by a lawyer. Get it
 reviewed by a securities lawyer before relying on it, especially before
 `BILLING_ENABLED` goes on or a second (paid) tenant onboards.
 
+**Substack cross-promotion (2026-09-17):** `lib/links.ts` holds
+`SUBSTACK_URL` (https://smartalphas.substack.com/), linked as "Newsletter"
+from the main landing page (nav + footer), `/dashboard` (header link +
+inline mention under the intro), `/dashboard/track-record` (header), and
+`/waitlist` and `/launch` (footers) — all outbound `target="_blank"` links,
+no subscriber-status checks or content sync. Scope was deliberately
+cross-promotion only: gating app access by Substack paid-subscription
+status, or auto-publishing app content to Substack, were both explicitly
+out of scope when this was built (Substack's official Developer API,
+shipped early 2026, only returns public profile info via a creator's
+LinkedIn handle — it doesn't expose paid/free subscriber status, so gating
+app access by Substack subscription would need an undocumented/unofficial
+workaround, not a supported integration, if it's wanted later).
+
 ## Stack
 
 - **Framework:** Next.js 16 (Turbopack) + React 19 + Tailwind CSS v4

@@ -5,6 +5,7 @@ import { WaitlistForm } from "@/components/waitlist-form";
 import { STOCKS } from "@/lib/stocks";
 import { getResultsChannelUrl } from "@/lib/telegram-results";
 import { disclaimerFooterText, DEFAULT_DISCLAIMER_TENANT } from "@/lib/disclaimer";
+import { SUBSTACK_URL } from "@/lib/links";
 
 // Skeptical, cold Product Hunt traffic is exactly who a public, unfiltered
 // track record is for — a lower-friction proof point than "just trust the
@@ -281,6 +282,14 @@ export default function LaunchPage() {
           <div className="flex items-center gap-5">
             <a href="#why" className="transition-colors hover:text-zinc-300">
               Why
+            </a>
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-zinc-300"
+            >
+              Newsletter
             </a>
             <Link href="/" className="transition-colors hover:text-zinc-300">
               Main site

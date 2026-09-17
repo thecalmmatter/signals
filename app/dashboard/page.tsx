@@ -9,6 +9,7 @@ import { STOCKS } from "@/lib/stocks";
 import { getAccessStatus } from "@/lib/access";
 import { ensureUserRecord } from "@/lib/users";
 import { resolveCustomerTenant } from "@/lib/tenants";
+import { SUBSTACK_URL } from "@/lib/links";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
@@ -60,6 +61,14 @@ export default async function DashboardPage() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
+            >
+              Newsletter
+            </a>
             <Link
               href="/dashboard/track-record"
               className="hidden text-sm text-zinc-400 transition-colors hover:text-zinc-100 sm:block"
@@ -80,7 +89,16 @@ export default async function DashboardPage() {
           <p className="mt-2 text-sm text-zinc-400">
             Large, mid and small caps, NSE and BSE. Refreshed automatically
             every 10 seconds — each call here is one more snowball rolling
-            into your track record.
+            into your track record.{" "}
+            <a
+              href={SUBSTACK_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-emerald-400 underline decoration-emerald-400/40 underline-offset-2 transition-colors hover:text-emerald-300"
+            >
+              Read the newsletter
+            </a>{" "}
+            for the thinking behind the calls.
           </p>
         </div>
 
