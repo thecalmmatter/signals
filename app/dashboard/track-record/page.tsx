@@ -166,7 +166,10 @@ export default async function TrackRecordPage() {
             that target permanently 🔒 — even if the trade later reverses and stops out. If no
             target was ever reached, the actual stop exit price vs entry is shown instead, never
             the live price after the fact. Not every signal performs as expected — that&rsquo;s the
-            point of showing it unfiltered.
+            point of showing it unfiltered. The SL Type column shows whether a trade&rsquo;s stop is
+            Fixed (a set price that doesn&rsquo;t move) or Trailing (ratchets up with the peak price
+            at the % shown) — check it before assuming a stop level means what it would on a fixed
+            stop.
           </p>
           {!quotesOk && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
@@ -214,6 +217,7 @@ export default async function TrackRecordPage() {
                 <th className="px-3 py-2.5">T2</th>
                 <th className="px-3 py-2.5">T3</th>
                 <th className="px-3 py-2.5">Stop</th>
+                <th className="px-3 py-2.5">SL Type</th>
                 <th className="px-3 py-2.5">Live / Exit</th>
                 <th className="px-3 py-2.5">Return</th>
                 <th className="px-3 py-2.5">Days</th>
@@ -222,7 +226,7 @@ export default async function TrackRecordPage() {
             <tbody className="divide-y divide-zinc-800/60">
               {signals.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-8 text-center text-zinc-500">
+                  <td colSpan={13} className="px-3 py-8 text-center text-zinc-500">
                     No live signals right now.
                   </td>
                 </tr>
@@ -286,6 +290,28 @@ export default async function TrackRecordPage() {
                         </span>
                       ) : (
                         <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {s.trailingSlEnabled ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="w-fit rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-400 ring-1 ring-inset ring-sky-400/30">
+                            Trailing {s.trailingSlPct}%
+                          </span>
+                          {s.trailingPeakPrice !== null && (
+                            <span className="text-[10px] text-zinc-500">
+                              {s.trailingSlPct}% {s.signal === "sell" ? "above trough" : "below peak"}{" "}
+                              {inr(s.trailingPeakPrice)}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span
+                          className="w-fit rounded-md bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-inset ring-zinc-700"
+                          title="A fixed stop price — does not move once set."
+                        >
+                          Fixed
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 tabular-nums text-zinc-300">
