@@ -25,6 +25,9 @@ const HEADERS = [
   "Target 3 Hit",
   "Stop",
   "Stop Hit",
+  "Trailing SL",
+  "Trail %",
+  "Current Trailing Stop",
   "Reference Price",
   "Return %",
 ];
@@ -67,6 +70,9 @@ function row(s: LiveSignal): (string | number | null)[] {
     s.target3 !== null ? (s.target3Hit ? "yes" : "no") : "",
     s.stop,
     s.outcome === "stopped" ? "yes" : "no",
+    s.trailingSlEnabled ? "yes" : "no",
+    s.trailingSlPct,
+    s.trailingStopPrice,
     `${referencePrice} (${referenceLabel})`,
     ret === null ? "" : ret.toFixed(2),
   ];

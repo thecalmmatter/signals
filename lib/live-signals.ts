@@ -50,6 +50,29 @@ function istDateStr(d: Date): string {
 export type SignalOutcome = "open" | "target_hit" | "stopped";
 
 /**
+ * Trailing stop level for a per-trade opt-in trailing SL
+ * (scripts/migration_trailing_stop.sql) — a fixed % below the highest price
+ * reached since entry (buy), or above the lowest price since entry (sell).
+ * `peak` here is that running extreme (signals.trailing_peak_price), not the
+ * live price — see the peak-tracking logic in loadLiveSignals(). Returns
+ * null for a "watch" signal or invalid inputs (no real level to compute).
+ *
+ * Backed by a one-time backtest (2026-09-21, 10 real closed trades): trailing
+ * SL clearly helped the two trades that moved favorably before reversing (a
+ * fixed stop gave the whole move back), and did nothing for trades that fell
+ * straight from entry. No single trail width won everywhere, which is why
+ * this is a per-trade %, not one hardcoded constant.
+ */
+export function trailingStopLevel(
+  signalType: "buy" | "sell" | "watch",
+  peak: number,
+  pct: number
+): number | null {
+  if (signalType === "watch" || !(peak > 0) || !(pct > 0)) return null;
+  return signalType === "buy" ? peak * (1 - pct / 100) : peak * (1 + pct / 100);
+}
+
+/**
  * The FURTHEST configured target hit (T3 if set, else T2, else T1) →
  * "target_hit" — a trade with a T1/T2/T3 ladder is still genuinely running
  * after only T1 prints; closing it there would hide that T2/T3 are still in
@@ -143,6 +166,20 @@ export type LiveSignal = {
   daysToExit: number;
   /** When this symbol's active signal was first generated (ISO). */
   generatedAt: string;
+  /** Per-trade opt-in — see scripts/migration_trailing_stop.sql. When true,
+   *  the trailing level (see trailingStopPrice) is what's actually checked
+   *  in computeOutcome() instead of `stop`. Admin-set, never on by default. */
+  trailingSlEnabled: boolean;
+  /** Trail width as a percent (e.g. 5 = 5%). null while trailing is off. */
+  trailingSlPct: number | null;
+  /** Highest (buy) / lowest (sell) price reached since entry — the ratchet
+   *  state trailingStopPrice is computed from. null while trailing is off or
+   *  the trade has already closed (the frozen exitPrice is the number that
+   *  matters once it's over, not a live-tracked peak that no longer moves). */
+  trailingPeakPrice: number | null;
+  /** Current trailing stop level — see trailingStopLevel(). null while
+   *  trailing is off, no peak yet, or the trade has already closed. */
+  trailingStopPrice: number | null;
 };
 
 // The furthest target actually reached so far, if any — null while nothing
@@ -213,24 +250,45 @@ const BASE_COLUMNS =
   "stop_price, days_in, days_to_exit, status, generated_at, updated_at";
 
 async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: number) {
-  // Four tiers, each degrading gracefully rather than taking the whole
+  // Five tiers, each degrading gracefully rather than taking the whole
   // ticker down:
-  //  0. Full — everything below, plus target_1_hit_at/target_2_hit_at/
+  //  0. Full — everything below, plus trailing_sl_enabled/trailing_sl_pct/
+  //     trailing_peak_price (migration_trailing_stop.sql) for per-trade
+  //     trailing SL.
+  //  1. Everything except trailing SL — target_1_hit_at/target_2_hit_at/
   //     target_3_hit_at (migration_target_hit_lock.sql) for sticky per-target
-  //     checkmarks.
-  //  1. outcome_locked/outcome_locked_at (migration_signal_outcome_lock.sql)
+  //     checkmarks, but the trailing SL migration hasn't run yet.
+  //  2. outcome_locked/outcome_locked_at (migration_signal_outcome_lock.sql)
   //     AND outcome_exit_price (migration_telegram_digest.sql) applied, but
   //     not the per-target hit columns yet.
-  //  2. Lock only — outcome_locked/outcome_locked_at applied, but the newer
+  //  3. Lock only — outcome_locked/outcome_locked_at applied, but the newer
   //     outcome_exit_price migration hasn't run yet on this environment.
   //     Sticky lock still works; the exit price just won't be frozen for the
   //     digest feature until the migration runs.
-  //  3. Neither — sticky lock disabled entirely, outcome computed live only.
+  //  4. Neither — sticky lock disabled entirely, outcome computed live only.
   //
   // Every tier also filters on tenant_id (scripts/migration_tenants.sql) —
   // no fallback tier for a missing tenant_id column, since that migration
   // is a hard prerequisite for this file (tenant_id is NOT NULL on
   // `signals`), unlike the other columns above which are optional add-ons.
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (symbol)
+                ${BASE_COLUMNS}, outcome_locked, outcome_locked_at, outcome_exit_price,
+                target_1_hit_at, target_2_hit_at, target_3_hit_at,
+                trailing_sl_enabled, trailing_sl_pct, trailing_peak_price
+           FROM signals
+          WHERE status = 'active' AND tenant_id = $1
+          ORDER BY symbol, updated_at DESC
+       ) t
+       ORDER BY generated_at DESC, symbol`,
+      [tenantId]
+    );
+    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: true, trailingSupported: true };
+  } catch {
+    // fall through to tier 1
+  }
   try {
     const { rows } = await pool.query(
       `SELECT * FROM (
@@ -244,9 +302,9 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: nu
        ORDER BY generated_at DESC, symbol`,
       [tenantId]
     );
-    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: true };
+    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: true, trailingSupported: false };
   } catch {
-    // fall through to tier 1
+    // fall through to tier 2
   }
   try {
     const { rows } = await pool.query(
@@ -260,9 +318,9 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: nu
        ORDER BY generated_at DESC, symbol`,
       [tenantId]
     );
-    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: false };
+    return { rows, lockSupported: true, exitPriceSupported: true, targetHitSupported: false, trailingSupported: false };
   } catch {
-    // fall through to tier 2
+    // fall through to tier 3
   }
   try {
     const { rows } = await pool.query(
@@ -276,7 +334,7 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: nu
        ORDER BY generated_at DESC, symbol`,
       [tenantId]
     );
-    return { rows, lockSupported: true, exitPriceSupported: false, targetHitSupported: false };
+    return { rows, lockSupported: true, exitPriceSupported: false, targetHitSupported: false, trailingSupported: false };
   } catch (error) {
     console.error(
       "loadLiveSignals: outcome_locked columns missing — run scripts/migration_signal_outcome_lock.sql; sticky lock disabled for now",
@@ -293,7 +351,7 @@ async function queryActiveSignals(pool: ReturnType<typeof getPool>, tenantId: nu
        ORDER BY generated_at DESC, symbol`,
       [tenantId]
     );
-    return { rows, lockSupported: false, exitPriceSupported: false, targetHitSupported: false };
+    return { rows, lockSupported: false, exitPriceSupported: false, targetHitSupported: false, trailingSupported: false };
   }
 }
 
@@ -313,7 +371,7 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
   // a second tenant's private trade outcomes would get broadcast onto the
   // operator's own public channel the moment that tenant has real signals.
   const isDefaultTenant = resolvedTenantId === defaultTenant.id;
-  const { rows, lockSupported, exitPriceSupported, targetHitSupported } = await queryActiveSignals(
+  const { rows, lockSupported, exitPriceSupported, targetHitSupported, trailingSupported } = await queryActiveSignals(
     pool,
     resolvedTenantId
   );
@@ -350,6 +408,14 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
   // on LiveSignal.
   const newlyTargetHit: { id: string; column: "target_1_hit_at" | "target_2_hit_at" | "target_3_hit_at" }[] = [];
 
+  // Trailing SL ratchet updates — a trade with trailing_sl_enabled that's
+  // still open and set a new favorable extreme this call. Persisted below so
+  // the next poll's trailing level starts from the peak actually reached, not
+  // from entry again. Only pushed for trades that are still open after this
+  // call — a trade that closed (via trailing stop or target) this same call
+  // has nothing left to ratchet.
+  const peakUpdates: { id: string; peak: number }[] = [];
+
   const signals: LiveSignal[] = rows.map((r) => {
     const quote = quotes.get(r.symbol as string);
     const price = quote ? quote.ltp : Number(r.price) || 0;
@@ -383,6 +449,20 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
     const target2 = numOrNull(r.target_price_2);
     const target3 = numOrNull(r.target_price_3);
     const stop = numOrNull(r.stop_price);
+    const entryPrice = numOrNull(r.entry_price);
+
+    // Per-trade trailing SL config (scripts/migration_trailing_stop.sql) —
+    // trailingSupported guards environments that predate the migration, same
+    // pattern as lockSupported/targetHitSupported above.
+    const trailingEnabled = trailingSupported ? Boolean(r.trailing_sl_enabled) : false;
+    const trailingPct = trailingSupported ? numOrNull(r.trailing_sl_pct) : null;
+    const storedPeak = trailingSupported ? numOrNull(r.trailing_peak_price) : null;
+    // Populated only while the trade is open and trailing is actually active
+    // — see the LiveSignal field doc comments (null once closed; the frozen
+    // exitPrice is the number that matters at that point, not a peak that no
+    // longer moves).
+    let trailingPeakPrice: number | null = null;
+    let trailingStopPrice: number | null = null;
 
     const locked = r.outcome_locked as "target_hit" | "stopped" | null | undefined;
     let outcome: SignalOutcome;
@@ -406,7 +486,23 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
       // the one-time DB backfill; this stays as a defensive fallback only.
       exitPrice = numOrNull(r.outcome_exit_price) ?? (locked === "stopped" ? stop : target) ?? price;
     } else {
-      const live = computeOutcome(signalType, price, dayLow, dayHigh, [target, target2, target3], stop);
+      // Trailing SL, when enabled, REPLACES stop_price as the level checked
+      // below — see trailingStopLevel() doc comment. The peak/trough is the
+      // greater of what's already been persisted and today's favorable
+      // extreme (dayHigh for a buy, dayLow for a sell) — same day-range
+      // reasoning as dayLow/dayHigh above: for an older signal that's today's
+      // full session; for one entered today, dayHigh/dayLow already collapse
+      // to the live tick (enteredToday, above), so this can't ratchet off
+      // pre-entry price action either.
+      let effectiveStop = stop;
+      if (trailingEnabled && trailingPct !== null && trailingPct > 0 && entryPrice !== null && signalType !== "watch") {
+        const basePeak = storedPeak ?? entryPrice;
+        trailingPeakPrice = signalType === "buy" ? Math.max(basePeak, dayHigh) : Math.min(basePeak, dayLow);
+        trailingStopPrice = trailingStopLevel(signalType, trailingPeakPrice, trailingPct);
+        if (trailingStopPrice !== null) effectiveStop = trailingStopPrice;
+      }
+
+      const live = computeOutcome(signalType, price, dayLow, dayHigh, [target, target2, target3], effectiveStop);
       outcome = live;
       if (live === "stopped" || live === "target_hit") {
         // Detection is via the day's high/low (see computeOutcome), so the
@@ -414,11 +510,13 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
         // by the time this poll runs, price may already have moved on. The
         // defined stop/target level itself is the honest number to freeze:
         // it's the level we know for a fact was reached, not a guess at
-        // what the live price happens to be right now.
+        // what the live price happens to be right now. For a trailing-SL
+        // close that's the trailing level (effectiveStop), not the original
+        // fixed stop_price — the trailing level is what actually triggered it.
         const setVals = [target, target2, target3].filter((t): t is number => t !== null && t > 0);
         exitPrice =
           live === "stopped"
-            ? (stop as number)
+            ? (effectiveStop as number)
             : signalType === "buy"
               ? Math.max(...setVals)
               : Math.min(...setVals);
@@ -428,11 +526,19 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
             outcome: live,
             symbol: r.symbol as string,
             signal: signalType,
-            entry: numOrNull(r.entry_price),
+            entry: entryPrice,
             exitPrice,
             daysIn: Number(r.days_in) || 0,
           });
         }
+        // Trade closed this call — matches the "null once closed" rule on
+        // trailingPeakPrice/trailingStopPrice (see LiveSignal doc comments):
+        // exitPrice above is now the number that matters, not a peak that no
+        // longer moves.
+        trailingPeakPrice = null;
+        trailingStopPrice = null;
+      } else if (trailingEnabled && trailingPeakPrice !== null && trailingPeakPrice !== storedPeak) {
+        peakUpdates.push({ id: r.id as string, peak: trailingPeakPrice });
       }
     }
 
@@ -477,7 +583,7 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
       price,
       changePct,
       change,
-      entry: numOrNull(r.entry_price),
+      entry: entryPrice,
       target,
       target2,
       target3,
@@ -490,6 +596,10 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
       daysIn: Number(r.days_in) || 0,
       daysToExit: Number(r.days_to_exit) || 0,
       generatedAt: new Date(r.generated_at as string).toISOString(),
+      trailingSlEnabled: trailingEnabled,
+      trailingSlPct: trailingPct,
+      trailingPeakPrice,
+      trailingStopPrice,
     };
   });
 
@@ -502,6 +612,26 @@ export async function loadLiveSignals(tenantId?: number): Promise<{ signals: Liv
         await pool.query(`UPDATE signals SET ${n.column} = now() WHERE id = $1 AND ${n.column} IS NULL`, [n.id]);
       } catch (error) {
         console.error("loadLiveSignals: failed to persist target hit lock", n.id, n.column, error);
+      }
+    }
+  }
+
+  if (peakUpdates.length > 0) {
+    // Ratchets trailing_peak_price forward — guarded so a slower concurrent
+    // poller can't drag a peak backward if it read stale data (the trailing
+    // level only ever moves favorably, same "sticky, never un-happens"
+    // philosophy as outcome_locked/target_N_hit_at above).
+    for (const p of peakUpdates) {
+      try {
+        await pool.query(
+          `UPDATE signals SET trailing_peak_price = $1
+             WHERE id = $2 AND (trailing_peak_price IS NULL OR
+                                 signal_type = 'buy' AND trailing_peak_price < $1 OR
+                                 signal_type = 'sell' AND trailing_peak_price > $1)`,
+          [p.peak, p.id]
+        );
+      } catch (error) {
+        console.error("loadLiveSignals: failed to persist trailing peak (run scripts/migration_trailing_stop.sql?)", p.id, error);
       }
     }
   }

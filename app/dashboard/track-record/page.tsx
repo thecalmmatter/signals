@@ -269,11 +269,19 @@ export default async function TrackRecordPage() {
                       <TargetCell value={s.target3} reached={s.target3Hit} />
                     </td>
                     <td className="px-3 py-2.5">
-                      {s.stop ? (
+                      {s.trailingSlEnabled && s.trailingStopPrice !== null ? (
+                        <span
+                          className="inline-flex items-center gap-1"
+                          title={`Trailing stop — ${s.trailingSlPct}% below the peak (₹${s.trailingPeakPrice?.toLocaleString("en-IN")}). Replaces the fixed stop while it's on; ratchets up, never back down.`}
+                        >
+                          <span className="tabular-nums text-sky-300">{inr(s.trailingStopPrice)}</span>
+                          <span className="text-sky-400" aria-hidden="true">↗</span>
+                        </span>
+                      ) : s.stop ? (
                         <span className="inline-flex items-center gap-1">
                           <span className="tabular-nums text-zinc-300">{inr(s.stop)}</span>
                           {s.outcome === "stopped" && (
-                            <span className="text-amber-400" title="Price hit the stop">✕</span>
+                            <span className="text-amber-400" title={s.trailingSlEnabled ? "Price hit the trailing stop" : "Price hit the stop"}>✕</span>
                           )}
                         </span>
                       ) : (

@@ -3,7 +3,8 @@
 export const ADMIN_COLUMNS = `
   id, symbol, name, signal_type, price,
   entry_price, target_price, target_price_2, target_price_3, stop_price,
-  status, source, trigger_date, scan_name, notes, updated_by, updated_at
+  status, source, trigger_date, scan_name, notes, updated_by, updated_at,
+  trailing_sl_enabled, trailing_sl_pct
 `;
 
 export type AdminSignal = {
@@ -27,6 +28,11 @@ export type AdminSignal = {
   notes: string | null;
   updatedBy: string | null;
   updatedAt: string | null;
+  /** Per-trade opt-in trailing SL (scripts/migration_trailing_stop.sql) —
+   *  see lib/live-signals.ts trailingStopLevel(). Never on by default. */
+  trailingSlEnabled: boolean;
+  /** Trail width as a percent, e.g. 5 = 5%. null while disabled. */
+  trailingSlPct: number | null;
 };
 
 function fmtDate(v: unknown): string | null {
@@ -56,5 +62,7 @@ export function mapAdminRow(row: Record<string, unknown>): AdminSignal {
     notes: row.notes as string | null,
     updatedBy: row.updated_by as string | null,
     updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : null,
+    trailingSlEnabled: Boolean(row.trailing_sl_enabled),
+    trailingSlPct: num(row.trailing_sl_pct),
   };
 }

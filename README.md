@@ -49,6 +49,28 @@ LinkedIn handle — it doesn't expose paid/free subscriber status, so gating
 app access by Substack subscription would need an undocumented/unofficial
 workaround, not a supported integration, if it's wanted later).
 
+**Trailing stop loss (2026-09-22):** per-trade opt-in, live signals only
+(`signals` table — the automatic engine behind `loadLiveSignals()`/the
+track-record "tradebook"; not mirrored on the manually-operated `positions`
+ledger, which as of this writing has never had a row closed by an admin).
+Backed by a one-time backtest (`trailing-sl-backtest.md`, 10 real closed
+trades) that found trailing SL clearly helps trades that move favorably
+before reversing and does nothing for trades that fall straight from entry —
+hence a per-trade admin toggle + %, not a blanket default or one hardcoded
+width. Schema: `scripts/migration_trailing_stop.sql` adds
+`trailing_sl_enabled`, `trailing_sl_pct`, `trailing_peak_price` to `signals`.
+Logic: `trailingStopLevel()` in `lib/live-signals.ts` — trails a fixed %
+below the peak price since entry (buy) / above the trough (sell), replacing
+`stop_price` as the level `computeOutcome()` checks while enabled; the peak
+only ever ratchets favorably and is persisted each poll
+(`trailing_peak_price`). Admin UI: a checkbox + % input per row in
+`components/admin-signals.tsx` (Trail SL column) — editing it, or any other
+field, resets the peak back to the current entry price, same "an edit
+invalidates prior derived state" rule already applied to
+`outcome_locked`/`target_N_hit_at`. Shown on `/dashboard/track-record`'s Stop
+column (with a trailing-level tooltip while open) and as three extra columns
+on the tradebook CSV download.
+
 ## Stack
 
 - **Framework:** Next.js 16 (Turbopack) + React 19 + Tailwind CSS v4

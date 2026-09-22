@@ -34,7 +34,7 @@ export async function PATCH(
 
   const pool = getPool();
   const prevRes = await pool.query(
-    "SELECT id, status, symbol, trigger_date, scan_name, tenant_id FROM signals WHERE id = $1",
+    "SELECT id, status, symbol, trigger_date, scan_name, tenant_id, entry_price, trailing_sl_enabled FROM signals WHERE id = $1",
     [id]
   );
   if (!prevRes.rows[0]) return json({ error: "not found" }, 404);
@@ -78,6 +78,42 @@ export async function PATCH(
     sets.push(`notes = ${P(v)}`);
   }
 
+  // Trailing SL (scripts/migration_trailing_stop.sql) — per-trade opt-in,
+  // never on by default. trailingSlPct bounds (0, 50] are a sanity check,
+  // not a product constraint: the backtest found no single width that won
+  // everywhere, so admins pick per trade.
+  let trailingEnabled: boolean | null = null;
+  if (body.trailingSlEnabled !== undefined) {
+    trailingEnabled = Boolean(body.trailingSlEnabled);
+    sets.push(`trailing_sl_enabled = ${P(trailingEnabled)}`);
+  }
+  if (body.trailingSlPct !== undefined) {
+    if (body.trailingSlPct === null || body.trailingSlPct === "") {
+      sets.push(`trailing_sl_pct = ${P(null)}`);
+    } else {
+      const pct = Number(body.trailingSlPct);
+      if (!Number.isFinite(pct) || pct <= 0 || pct > 50) {
+        return json({ error: "trailingSlPct must be a number between 0 and 50" }, 400);
+      }
+      sets.push(`trailing_sl_pct = ${P(pct)}`);
+    }
+  }
+  // Ratchet state resets on ANY edit that could invalidate it — same rule
+  // this route already applies to outcome_locked/target_N_hit_at below.
+  // Only meaningful once trailing ends up enabled; a no-op push otherwise.
+  const effectiveTrailingEnabled = trailingEnabled !== null ? trailingEnabled : Boolean(prev.trailing_sl_enabled);
+  if (effectiveTrailingEnabled) {
+    const effectiveEntry =
+      body.entryPrice !== undefined
+        ? (goodNum(body.entryPrice) as number | null) // already validated above, can't be "invalid" here
+        : prev.entry_price !== null
+          ? Number(prev.entry_price)
+          : null;
+    if (effectiveEntry !== null) {
+      sets.push(`trailing_peak_price = ${P(effectiveEntry)}`);
+    }
+  }
+
   sets.push(`updated_by = ${P(adminId)}`, `updated_at = now()`);
 
   // Event type + human-readable detail of what changed.
@@ -94,6 +130,8 @@ export async function PATCH(
   if (body.targetPrice3 !== undefined) changes.push(`target3=${body.targetPrice3}`);
   if (body.stopPrice !== undefined) changes.push(`stop=${body.stopPrice}`);
   if (body.notes !== undefined) changes.push("notes");
+  if (body.trailingSlEnabled !== undefined) changes.push(`trailingSL=${trailingEnabled ? "on" : "off"}`);
+  if (body.trailingSlPct !== undefined) changes.push(`trailingPct=${body.trailingSlPct}`);
   const detail = changes.length ? changes.join("; ") : "no fields changed";
 
   await pool.query(`UPDATE signals SET ${sets.join(", ")} WHERE id = ${P(id)}`, vals);

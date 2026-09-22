@@ -18,7 +18,16 @@ const inputCls =
 const btnCls =
   "rounded-md px-2 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50";
 
-type Draft = { entry: string; target: string; target2: string; target3: string; stop: string; notes: string };
+type Draft = {
+  entry: string;
+  target: string;
+  target2: string;
+  target3: string;
+  stop: string;
+  notes: string;
+  trailingEnabled: boolean;
+  trailingPct: string;
+};
 type AddForm = {
   symbol: string;
   type: "buy" | "sell";
@@ -44,6 +53,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
           target3: s.targetPrice3?.toString() ?? "",
           stop: s.stopPrice?.toString() ?? "",
           notes: s.notes ?? "",
+          trailingEnabled: s.trailingSlEnabled,
+          trailingPct: s.trailingSlPct?.toString() ?? "",
         },
       ])
     )
@@ -72,8 +83,11 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
     return () => window.removeEventListener("signals:prefill-add", onPrefill);
   }, []);
 
-  const setDraft = (id: string, key: keyof Draft, value: string) =>
+  const setDraft = (id: string, key: keyof Omit<Draft, "trailingEnabled">, value: string) =>
     setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
+
+  const toggleTrailing = (id: string) =>
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], trailingEnabled: !d[id].trailingEnabled } }));
 
   async function patch(id: string, body: Record<string, unknown>) {
     setBusy((b) => new Set(b).add(id));
@@ -98,6 +112,10 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
   async function save(id: string) {
     setError(null);
     const d = drafts[id];
+    if (d.trailingEnabled && (d.trailingPct === "" || !(Number(d.trailingPct) > 0))) {
+      setError("set a trail % to enable trailing SL");
+      return;
+    }
     try {
       await patch(id, {
         entryPrice: d.entry === "" ? null : Number(d.entry),
@@ -106,6 +124,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
         targetPrice3: d.target3 === "" ? null : Number(d.target3),
         stopPrice: d.stop === "" ? null : Number(d.stop),
         notes: d.notes,
+        trailingSlEnabled: d.trailingEnabled,
+        trailingSlPct: d.trailingEnabled ? Number(d.trailingPct) : null,
       });
     } catch (e) {
       setError((e as Error).message);
@@ -176,6 +196,8 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
           target3: data.signal.targetPrice3?.toString() ?? "",
           stop: data.signal.stopPrice?.toString() ?? "",
           notes: "",
+          trailingEnabled: data.signal.trailingSlEnabled,
+          trailingPct: data.signal.trailingSlPct?.toString() ?? "",
         },
       }));
       setAddForm(emptyAddForm);
@@ -299,6 +321,7 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
               <th className="px-3 py-2.5">T2</th>
               <th className="px-3 py-2.5">T3</th>
               <th className="px-3 py-2.5">Stop</th>
+              <th className="px-3 py-2.5">Trail SL</th>
               <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Notes</th>
               <th className="px-3 py-2.5">Actions</th>
@@ -307,7 +330,7 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
           <tbody className="divide-y divide-zinc-800/60">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={13} className="px-3 py-8 text-center text-zinc-500">
                   No signals yet.
                 </td>
               </tr>
@@ -382,6 +405,32 @@ export default function AdminSignals({ signals }: { signals: AdminSignal[] }) {
                       value={d?.stop ?? ""}
                       onChange={(e) => setDraft(r.id, "stop", e.target.value)}
                     />
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-1.5" title="Trails a fixed % below (buy) / above (sell) the peak price since entry — replaces the fixed stop above while on. Per-trade, off by default.">
+                      <input
+                        type="checkbox"
+                        checked={d?.trailingEnabled ?? false}
+                        onChange={() => toggleTrailing(r.id)}
+                        className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 accent-sky-500"
+                      />
+                      <input
+                        className={`${inputCls} w-14`}
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="50"
+                        placeholder="%"
+                        disabled={!d?.trailingEnabled}
+                        value={d?.trailingPct ?? ""}
+                        onChange={(e) => setDraft(r.id, "trailingPct", e.target.value)}
+                      />
+                      {r.trailingSlEnabled && (
+                        <span className="text-[10px] text-sky-400" aria-hidden="true">
+                          ↗
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     <span

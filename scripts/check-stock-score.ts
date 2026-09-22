@@ -66,6 +66,10 @@ async function main() {
       daysIn: 0,
       daysToExit: 0,
       generatedAt: new Date().toISOString(),
+      trailingSlEnabled: false,
+      trailingSlPct: null,
+      trailingPeakPrice: null,
+      trailingStopPrice: null,
     };
   } else {
     // Default path: look up the symbol's actual live signal, exactly like
