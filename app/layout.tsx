@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
+import { Schibsted_Grotesk, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Primary UI/body font — an editorial newsroom grotesk (Schibsted Grotesk was
+// built for Scandinavian newspapers), chosen deliberately over Geist, which
+// is the Next.js/Vercel default and shows up as the "default AI app" look on
+// a huge share of vibe-coded products. Pairs with the existing Instrument
+// Serif hero accent below rather than fighting it.
+const schibstedGrotesk = Schibsted_Grotesk({
+  variable: "--font-schibsted-grotesk",
   subsets: ["latin"],
 });
 
@@ -77,7 +82,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
+      className={`${schibstedGrotesk.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
     >
       <head>
         <script
